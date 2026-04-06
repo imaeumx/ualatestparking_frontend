@@ -1,35 +1,58 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import CryptoJS from 'crypto-js';
 import { usePopup } from '../components/PopupContext';
+import { decryptDES } from '../utils/desCrypto';
 
 /**
  * AdminPanel Component
- * Main administrative interface for managing parking applications and parking slots.
- * Features: Application approval/rejection, parking management, sticker validation.
+ *
+ * High-level purpose:
+ * - Central personnel dashboard for application review, reservation decisions,
+ *   sticker verification, parking operations, and activity logs.
+ *
+ * Role model used in this file:
+ * - root_admin: full access + can create personnel accounts
+ * - admin: can manage applications/reservations/parking
+ * - guard: focused parking operations + reservation no-show handling
+ *
+ * Design notes for study:
+ * - Data is fetched from backend APIs and synchronized with localStorage for
+ *   parking slots/logs/read-notification keys.
+ * - Reservation state is reflected on parking slots via marker fields:
+ *   `reservedFor` and `reservedStickerId`.
+ * - Time-based behavior (overdue/escalation) uses `timeTick` interval refresh.
  */
 export default function AdminPanel() {
     const navigate = useNavigate();
     const { showError, showInfo } = usePopup();
     const TOTAL_PARKING_SLOTS = 180;
+
+    // Session user loaded from localStorage (set at login time).
     const currentUser = JSON.parse(localStorage.getItem('currentUser') || 'null') || {};
+
+    // Normalize role text once to avoid repeated case-sensitive checks everywhere.
     const normalizedRole = (currentUser.role || '').toLowerCase();
     const isRootAdmin = normalizedRole === 'root_admin';
     const isAdmin = normalizedRole === 'admin' || isRootAdmin;
     const isGuard = normalizedRole === 'guard';
 
     // Application management state
+    // records: all sticker applications visible to personnel.
+    // search: plate-number text query used in applications table.
     const [records, setRecords] = useState([]);
     const [search, setSearch] = useState('');
 
     // Sticker verification state
+    // verifyInput/activeVerify: lookup a specific sticker ID in applications list.
+    // verifySecretKeyInput/hasValidVerifyKey: optional decrypt gate for verify view.
     const [verifyInput, setVerifyInput] = useState('');
     const [activeVerify, setActiveVerify] = useState('');
     const [verifySecretKeyInput, setVerifySecretKeyInput] = useState('');
     const [hasValidVerifyKey, setHasValidVerifyKey] = useState(false);
 
     // UI state
+    // activeTab chooses which major section is rendered.
     const [activeTab, setActiveTab] = useState('applications');
 
     // Parking management state
@@ -46,6 +69,8 @@ export default function AdminPanel() {
     const [logsPage, setLogsPage] = useState(1);
 
     // Reservation management state
+    // pendingReservations stores all fetched reservations; mini-tab filters list view.
+    // editing* states control inline admin edits (status + notes + save spinner).
     const [pendingReservations, setPendingReservations] = useState([]);
     const [reservationMiniTab, setReservationMiniTab] = useState('pending');
     const [editingReservationId, setEditingReservationId] = useState(null);
@@ -58,20 +83,24 @@ export default function AdminPanel() {
     const [personnelNotifItems, setPersonnelNotifItems] = useState([]);
     const [readPersonnelNotifKeys, setReadPersonnelNotifKeys] = useState([]);
 
-    // Root admin personnel creation
+    // Root admin personnel creation form state.
     const [personnelFirstName, setPersonnelFirstName] = useState('');
     const [personnelLastName, setPersonnelLastName] = useState('');
     const [personnelEmail, setPersonnelEmail] = useState('');
     const [personnelUsername, setPersonnelUsername] = useState('');
     const [personnelPassword, setPersonnelPassword] = useState('');
     const [personnelRole, setPersonnelRole] = useState('admin');
+    // Per-user localStorage key so each personnel account keeps independent read state.
     const personnelNotifReadStorageKey = `personnelNotifRead_${currentUser.username || 'personnel'}`;
 
     useEffect(() => {
+        // Restore read-notification keys from localStorage on mount/user change.
         const savedReadKeys = JSON.parse(localStorage.getItem(personnelNotifReadStorageKey) || '[]');
         setReadPersonnelNotifKeys(Array.isArray(savedReadKeys) ? savedReadKeys : []);
     }, [personnelNotifReadStorageKey]);
 
+    // Semester boundaries helper.
+    // Returns inclusive start/end date range of current semester based on month.
     const getCurrentSemesterRange = (baseDate = new Date()) => {
         const year = baseDate.getFullYear();
         const month = baseDate.getMonth() + 1;
@@ -85,6 +114,7 @@ export default function AdminPanel() {
         return { start: new Date(year, 5, 1), end: new Date(year, 6, 31) };
     };
 
+    // A sticker is valid when approved and expiration date falls within current semester range.
     const isStickerValidForCurrentSemester = (record) => {
         if (!record || record.status !== 'Approved' || !record.expiration_date) {
             return false;
@@ -97,6 +127,7 @@ export default function AdminPanel() {
         return expiration >= start && expiration <= end;
     };
 
+    // Human-readable semester label for table badges/tooltips.
     const getSemesterLabelFromDate = (dateValue) => {
         const date = dateValue ? new Date(dateValue) : new Date();
         if (Number.isNaN(date.getTime())) return 'Unknown Semester';
@@ -106,6 +137,7 @@ export default function AdminPanel() {
         return '3rd Semester (June-July)';
     };
 
+    // Compact semester bucket key used for equality checks.
     const getSemesterBucket = (dateValue) => {
         const date = dateValue ? new Date(dateValue) : new Date();
         if (Number.isNaN(date.getTime())) return 'unknown';
@@ -115,6 +147,7 @@ export default function AdminPanel() {
         return 'sem3';
     };
 
+    // Backward-compatible semester validity check used by older table logic.
     const isApprovedStickerValidThisSemester = (record) => {
         if (!record || record.status !== 'Approved' || !record.expiration_date) {
             return false;
@@ -149,15 +182,8 @@ export default function AdminPanel() {
         return application ? decryptData(application.plate_number) : null;
     };
 
-    /**
-     * Decrypt DES-encrypted data using the application secret key.
-     */
-    const decryptData = (ciphertext) => {
-        try {
-            const bytes = CryptoJS.DES.decrypt(ciphertext, 'UA-SECRET-KEY');
-            return bytes.toString(CryptoJS.enc.Utf8) || ciphertext;
-        } catch (e) { return ciphertext; }
-    };
+    // Local alias used by existing table/render code.
+    const decryptData = (ciphertext) => decryptDES(ciphertext);
 
     /**
      * Fetch all vehicle applications from the backend.
@@ -203,6 +229,8 @@ export default function AdminPanel() {
         }
     };
 
+    // Normalize reservation.reserved_spots to integer slot IDs array.
+    // Supports backend sending either JSON array or JSON-stringified array.
     const parseReservationSpots = (reservation) => {
         if (!reservation) return [];
         const rawSpots = Array.isArray(reservation.reserved_spots)
@@ -220,6 +248,9 @@ export default function AdminPanel() {
             .filter((spotId) => !Number.isNaN(spotId));
     };
 
+    // Reflect admin reservation decision onto parkingSlots markers.
+    // approved => attach reservedFor/reservedStickerId marker to targeted slots
+    // non-approved => clear reservation marker only if it belongs to same reservation
     const applyReservationToSlots = (reservation, nextStatus) => {
         if (!reservation) return;
         const normalizedSpots = parseReservationSpots(reservation);
@@ -257,18 +288,22 @@ export default function AdminPanel() {
         localStorage.setItem('parkingSlots', JSON.stringify(updatedSlots));
     };
 
+    // Start inline edit mode for one reservation row.
     const beginReservationEdit = (reservation) => {
         setEditingReservationId(reservation.id);
         setEditReservationStatus((reservation.status || 'pending').toLowerCase());
         setEditReservationNotes((reservation.admin_notes || '').trim());
     };
 
+    // Cancel edit mode and reset temporary fields.
     const cancelReservationEdit = () => {
         setEditingReservationId(null);
         setEditReservationStatus('pending');
         setEditReservationNotes('');
     };
 
+    // Persist admin reservation changes (status + notes) to backend.
+    // On success, sync local slot markers and refresh reservation list.
     const saveReservationEdit = async (reservation) => {
         if (!reservation) return;
 
@@ -298,7 +333,11 @@ export default function AdminPanel() {
         }
     };
 
-    // Initialize data on component mount and enforce personnel-only access.
+    // Mount bootstrap:
+    // 1) enforce personnel-only access
+    // 2) enforce auth token presence
+    // 3) fetch records/reservations + restore logs
+    // 4) guards default to parking tab
     useEffect(() => {
         if (!isRootAdmin && !isAdmin && !isGuard) {
             navigate('/');
@@ -325,13 +364,15 @@ export default function AdminPanel() {
     }, []);
 
     useEffect(() => {
+        // Minute ticker used to recompute overdue/escalation time-based UI.
         const timer = setInterval(() => {
             setTimeTick(Date.now());
         }, 60 * 1000);
         return () => clearInterval(timer);
     }, []);
 
-    // Initialize parking slots from localStorage or create default
+    // Initialize parking slots from localStorage or build clean defaults.
+    // Also normalizes older slot objects that may miss reservation fields.
     useEffect(() => {
         const savedSlots = localStorage.getItem('parkingSlots');
         if (savedSlots) {
@@ -393,6 +434,7 @@ export default function AdminPanel() {
     const clearVerify = () => { setVerifyInput(''); setActiveVerify(''); };
 
     const handleVerifySecretKey = () => {
+        // Manual key gate for non-admin users to reveal decrypted verify values.
         if ((verifySecretKeyInput || '').trim() === 'UA-SECRET-KEY') {
             setHasValidVerifyKey(true);
             showInfo('Valid secret key. Decrypted verify view enabled.');
@@ -402,7 +444,7 @@ export default function AdminPanel() {
         }
     };
 
-    // Enter key handlers for better UX
+    // Enter key handler for sticker verify field.
     const handleVerifyKeyPress = (e) => {
         if (e.key === 'Enter') {
             handleVerify();
@@ -422,6 +464,7 @@ export default function AdminPanel() {
         }
     };
 
+    // Append one parking event to local log history (keeps latest 300 entries).
     const addParkingLog = (eventType, slot, notes = '') => {
         const nextLog = {
             id: `${Date.now()}-${slot.id}`,
@@ -439,6 +482,10 @@ export default function AdminPanel() {
         localStorage.setItem('parkingLogs', JSON.stringify(updatedLogs));
     };
 
+    // Build reservation timing state machine for one slot.
+    // upcoming: before reserved time
+    // active: reserved time to +30 minutes
+    // overdue: beyond +30 minutes no-show window
     const getReservationInfo = (slot) => {
         if (!slot?.reservedFor || !slot?.reservedStickerId) return null;
         const reservedAt = new Date(slot.reservedFor);
@@ -456,6 +503,7 @@ export default function AdminPanel() {
         };
     };
 
+    // Human-readable status string shown in parking list/grid.
     const getParkingDisplayStatus = (slot) => {
         if (slot.status === 'occupied') return 'Occupied';
         const reservationInfo = getReservationInfo(slot);
@@ -472,6 +520,8 @@ export default function AdminPanel() {
         return date.toLocaleString();
     };
 
+    // Guest window means reservation is active/overdue and sticker marker is N/A.
+    // In this flow, guard/admin can park using plate only (no sticker).
     const isGuestReservationWindow = (slot) => {
         if (!slot) return false;
         const reservationInfo = getReservationInfo(slot);
@@ -479,6 +529,7 @@ export default function AdminPanel() {
         return !!reservationInfo && (reservationInfo.isActive || reservationInfo.isOverdue) && reservedSticker === 'N/A';
     };
 
+    // Guard/admin manual release for overdue reservations after verification of no-show.
     const releaseOverdueReservation = (slotId) => {
         const targetSlot = parkingSlots.find(slot => slot.id === slotId);
         if (!targetSlot) {
@@ -538,6 +589,7 @@ export default function AdminPanel() {
         return true;
     };
 
+    // Guest/event parking flow for multi-spot reservations tagged as N/A sticker.
     const parkGuestVehicle = (slotId, plateNumber) => {
         const normalizedPlate = (plateNumber || '').trim().toUpperCase();
         if (!normalizedPlate) {
@@ -584,6 +636,7 @@ export default function AdminPanel() {
         }
     };
 
+    // Root-admin-only account creation endpoint for personnel onboarding.
     const handleCreatePersonnelAccount = async () => {
         if (!isRootAdmin) {
             showError('Only root admin can create personnel accounts.');
@@ -624,6 +677,9 @@ export default function AdminPanel() {
     };
 
     useEffect(() => {
+        // Escalation notifier:
+        // If reservation remains overdue for additional 5 minutes (35 total from start),
+        // show guard/admin reminder and persist dedupe keys in localStorage.
         const now = Date.now();
         const escalationDelayMs = 5 * 60 * 1000;
         const escalatedSlots = parkingSlots.filter(slot => {
@@ -655,6 +711,8 @@ export default function AdminPanel() {
     }, [parkingSlots, timeTick]);
 
     useEffect(() => {
+        // Build notification dropdown items from active escalations and keep
+        // read-key list trimmed to active keys so unread badge remains accurate.
         const now = Date.now();
         const escalationDelayMs = 5 * 60 * 1000;
 
@@ -693,6 +751,7 @@ export default function AdminPanel() {
         (item) => !readPersonnelNotifKeys.includes(item.key)
     ).length;
 
+    // Mark current notification items as read for this personnel user.
     const markPersonnelNotifsAsRead = () => {
         const allKeys = personnelNotifItems.map((item) => item.key);
         setReadPersonnelNotifKeys(allKeys);
@@ -735,7 +794,7 @@ export default function AdminPanel() {
         }
     };
 
-    // Calculate statistics
+    // Dashboard counters and derived table lists.
     const pendingCount = records.filter(r => r.status === 'Pending').length;
     const approvedCount = records.filter(r => r.status === 'Approved').length;
     const totalRevenue = records.filter(r => r.status === 'Approved')

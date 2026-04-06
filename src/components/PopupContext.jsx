@@ -1,24 +1,29 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState } from 'react';
 import Popup from './Popup';
 
+// Shared popup context for app-wide notifications.
 const PopupContext = createContext();
 
 /**
- * PopupProvider Component
- * Provides popup functionality throughout the app
+ * PopupProvider
+ * Wrap this around app content so children can call usePopup().
  */
 export function PopupProvider({ children }) {
+    // Current popup payload. null means no popup is shown.
     const [popup, setPopup] = useState(null);
 
+    // Base setter used by specialized helpers below.
     const showPopup = (message, type = 'info', duration = 0) => {
         setPopup({ message, type, duration });
     };
 
+    // Removes popup from UI.
     const hidePopup = () => {
         setPopup(null);
     };
 
-    // Auto-hide success messages after 3 seconds
+    // Convenience helpers with sensible defaults.
     const showSuccess = (message, duration = 3000) => {
         showPopup(message, 'success', duration);
     };
@@ -36,14 +41,16 @@ export function PopupProvider({ children }) {
     };
 
     return (
-        <PopupContext.Provider value={{
-            showPopup,
-            showSuccess,
-            showError,
-            showWarning,
-            showInfo,
-            hidePopup
-        }}>
+        <PopupContext.Provider
+            value={{
+                showPopup,
+                showSuccess,
+                showError,
+                showWarning,
+                showInfo,
+                hidePopup
+            }}
+        >
             {children}
             {popup && (
                 <Popup
@@ -58,7 +65,8 @@ export function PopupProvider({ children }) {
 }
 
 /**
- * Custom hook to use popup functionality
+ * usePopup
+ * Access popup controls from PopupContext.
  */
 export function usePopup() {
     const context = useContext(PopupContext);

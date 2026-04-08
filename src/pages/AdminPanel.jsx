@@ -950,18 +950,21 @@ export default function AdminPanel() {
 
                 {/* TOPBAR */}
                 <div className="topbar">
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div className="welcome-row">
                         <h2 style={{ margin: 0 }}>UA Personnel Management</h2>
-                        <p className="subtitle" style={{ margin: 0 }}>Role: {isRootAdmin ? 'ROOT ADMIN' : isAdmin ? 'ADMIN' : 'SECURITY GUARD'}</p>
+                        <p className="subtitle" style={{ margin: 0 }}>
+                            Role: {isRootAdmin ? 'ROOT ADMIN' : isAdmin ? 'ADMIN' : 'SECURITY GUARD'}
+                        </p>
                     </div>
-                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', position: 'relative' }}>
+                    
+                    <div className="topbar-actions">
                         <button className="btn-gray slim bell-btn" onClick={() => setShowPersonnelNotif(!showPersonnelNotif)}>
                             🔔
                             {unreadPersonnelNotifCount > 0 && <span className="notif-count">{unreadPersonnelNotifCount}</span>}
                         </button>
 
                         {showPersonnelNotif && (
-                            <div className="notif-dropdown" style={{ minWidth: '360px' }}>
+                            <div className="notif-dropdown" style={{ minWidth: '320px' }}>
                                 <h4>Notifications</h4>
                                 {personnelNotifItems.length === 0 ? (
                                     <p className="empty-notif">No new notifications.</p>
@@ -974,12 +977,16 @@ export default function AdminPanel() {
                                     ))
                                 )}
                                 {personnelNotifItems.length > 0 && unreadPersonnelNotifCount > 0 && (
-                                    <button className="link-btn mark-read" onClick={markPersonnelNotifsAsRead}>Mark as Read</button>
+                                    <button className="link-btn mark-read" onClick={markPersonnelNotifsAsRead}>
+                                        Mark as Read
+                                    </button>
                                 )}
                             </div>
                         )}
 
-                        <button className="btn-blue slim" onClick={() => navigate('/')}>Logout</button>
+                        <button className="btn-blue slim" onClick={() => navigate('/')}>
+                            Logout
+                        </button>
                     </div>
                 </div>
 

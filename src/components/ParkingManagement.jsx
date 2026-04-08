@@ -1025,7 +1025,7 @@ export default function ParkingManagement({
                                                 {area.name === 'Vertical Parking Space' ? (
                                                     // Vertical area uses column-first layout with lane/gutter strips between groups.
                                                     <>
-                                                        <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'center', gap: '16px', overflowX: 'auto', paddingBottom: '6px' }}>
+                                                        <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'flex-start', gap: '16px', overflowX: 'auto', paddingBottom: '6px' }}>
                                                             {Array.from({ length: 5 }, (_, columnIndex) => {
                                                                 const columnSlots = areaSlots.slice(columnIndex * 10, (columnIndex + 1) * 10);
 

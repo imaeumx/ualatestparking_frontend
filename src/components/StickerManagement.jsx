@@ -182,7 +182,7 @@ export default function StickerManagement({
                             <input 
                                 placeholder="Enter Plate Number" 
                                 value={plate} 
-                                onChange={e => setPlate(e.target.value)}
+                                onChange={e => setPlate(e.target.value.toUpperCase())}
                                 onKeyDown={handleApplicationKeyPress}
                             />
                         </div>
@@ -288,15 +288,15 @@ export default function StickerManagement({
             {/* Step C2: click Confirm Payment to run submitApp() */}
             {showPaymentModal && (
                 <div className="modal-overlay" onClick={() => setShowPaymentModal(false)}>
-                    <div className="modal-content card" style={{ maxWidth: '560px', width: '94%', color: '#ffffff' }} onClick={(e) => e.stopPropagation()}>
-                        <h3 style={{ marginTop: 0, color: '#ffffff' }}>Sticker Payment</h3>
-                        <p style={{ marginBottom: '12px', color: '#ffffff' }}>
+                    <div className="modal-content card" style={{ maxWidth: '560px', width: '94%' }} onClick={(e) => e.stopPropagation()}>
+                        <h3 style={{ marginTop: 0 }}>Sticker Payment</h3>
+                        <p style={{ marginBottom: '12px' }}>
                             List of Payment Method:{' '}
                             <a
                                 href="https://bit.ly/ListOfPaymentMethod"
                                 target="_blank"
                                 rel="noreferrer"
-                                style={{ color: '#93c5fd' }}
+                                style={{ color: '#2563eb' }}
                             >
                                 https://bit.ly/ListOfPaymentMethod
                             </a>
@@ -304,7 +304,7 @@ export default function StickerManagement({
 
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                                 <div>
-                                    <label className="small-label" style={{ color: '#ffffff' }}>Payment Method</label>
+                                    <label className="small-label">Payment Method</label>
                                     <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
                                         {paymentMethods.map(method => (
                                             <option key={method} value={method}>{method}</option>
@@ -312,7 +312,7 @@ export default function StickerManagement({
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="small-label" style={{ color: '#ffffff' }}>Reference Number</label>
+                                    <label className="small-label">Reference Number</label>
                                     <input
                                         type="text"
                                         placeholder="Enter payment reference number"

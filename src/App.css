@@ -48,8 +48,8 @@ body {
 }
 
 .admin-large-card {
-    max-width: 1200px !important;
-    width: 95%;
+    max-width: 1600px !important;
+    width: min(98vw, 1600px);
 }
 
 .dashboard-card {
@@ -260,6 +260,9 @@ button:hover {
     display: flex;
     gap: 20px;
     align-items: flex-start;
+    width: 100%;
+    /* Siguraduhin na hindi lalampas ang layout sa card */
+    max-width: 100%;
 }
 
 .admin-tabs {
@@ -275,6 +278,9 @@ button:hover {
 
 .admin-main {
     flex: 1;
+    /* CRITICAL: Pinipigilan nito ang main content na "itulak" ang sidebar 
+       o lumabas sa screen. Pinipilit nito ang container na mag-shrink. */
+    min-width: 0;
 }
 
 .admin-tabs .tab-button {
@@ -358,6 +364,23 @@ button:hover {
     display: inline-block;
 }
 
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.65);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+    z-index: 1200;
+}
+
+.modal-content {
+    position: relative;
+    max-width: 560px;
+    width: 100%;
+}
+
 .bell-btn {
     position: relative;
     width: 42px;
@@ -406,9 +429,11 @@ button:hover {
 
 /* --- 7. TABLES --- */
 .table-wrap {
-    overflow-x: auto;
+    width: 100%;
+    overflow-x: auto; /* Lalabas ang scrollbar dito kapag malapad ang table */
     border: 1px solid #e2e8f0;
     border-radius: 10px;
+    background: #ffffff;
 }
 
 .data-table {
@@ -489,88 +514,395 @@ button:hover {
     .notif-dropdown { width: 100%; right: auto; left: 0; }
 }
 
-/* --- ADMIN PANEL "SUPER CARD" --- */
-.admin-large-card {
-    max-width: 1400px !important; /* This makes it take up most of the screen */
-    width: 95%;
-    margin: 0 auto;
+/* iPad Air: 820x1180px - FIT WITHOUT SCROLL (except parking grid) */
+@media (min-width: 750px) and (max-width: 1000px) {
+    html, body { 
+        overflow-x: hidden !important; 
+        width: 100% !important;
+    }
+    
+    .center { 
+        width: 100%; 
+        padding: 0; 
+        margin: 0; 
+        justify-content: stretch; 
+        overflow: hidden !important; 
+    }
+    .card { 
+        max-width: 100% !important; 
+        width: 100% !important; 
+        border-radius: 0 !important; 
+        padding: 8px !important; 
+        margin: 0 !important; 
+        overflow: hidden !important; 
+    }
+    .dashboard-card { 
+        width: 100% !important; 
+    }
+    .dashboard-bg { 
+        padding-top: 0; 
+    }
+    
+    /* Keep sidebar on LEFT, just make narrower */
+    [style*="flex: '0 0 260px'"] {
+        flex: 0 0 180px !important;
+        min-width: 0 !important;
+        overflow: hidden !important;
+    }
+    
+    .user-nav-panel {
+        padding: 8px !important;
+        gap: 6px !important;
+        min-width: 0 !important;
+        overflow: hidden !important;
+    }
+    
+    .user-nav-panel .tab-button {
+        padding: 10px 8px !important;
+        font-size: 0.8rem !important;
+    }
+    
+    /* Main content area responsive */
+    [style*="flex: 1"][style*="flexDirection: 'column'"] {
+        min-width: 0 !important;
+    }
+    
+    /* PARKING GRID - ALLOW SCROLL */
+    div[style*="overflowX: 'auto'"] {
+        overflow-x: auto !important;
+    }
+    
+    /* Parking slots - reduce size */
+    button[style*="minHeight"] {
+        min-height: 80px !important;
+        padding: 8px 6px !important;
+    }
+    
+    button div:first-child { font-size: 1.3rem !important; }
+    button div:nth-child(2) { font-size: 0.75rem !important; }
+    
+    /* Hide scrollbars elsewhere but not on parking grid */
+    ::-webkit-scrollbar { width: 0 !important; }
 }
 
-/* Stat Cards inside Admin */
-.stat-card {
-    background: #f8fafc;
-    padding: 15px;
-    border-radius: 10px;
-    text-align: center;
-    border: 1px solid #e2e8f0;
+/* ==========================================
+   IPHONE 14 PRO MAX / MOBILE OPTIMIZATION 
+   ========================================== */
+@media (max-width: 430px) {
+    
+    /* 1. HEADER & TOPBAR CENTERING */
+    .topbar {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        text-align: center !important;
+        gap: 12px !important;
+    }
+
+    .welcome-row {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+    }
+
+    /* 2. TOP ACTIONS (Settings, Notif, Logout) */
+    .topbar-actions {
+        display: flex !important;
+        flex-direction: row !important;
+        justify-content: center !important;
+        align-items: center !important;
+        gap: 10px !important;
+        width: 100% !important;
+        margin: 10px 0 !important;
+    }
+
+    /* 3. HORIZONTAL NAVIGATION BAR (Original Colors) */
+    .user-nav-panel {
+        background: #ffffff !important;
+        border: 1px solid #e2e8f0 !important;
+        border-radius: 20px !important;
+        padding: 16px !important;
+        width: 100% !important;
+        box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08) !important;
+    }
+
+    .nav-section-title {
+        color: #64748b !important;
+        text-align: center !important;
+        margin-bottom: 12px !important;
+    }
+
+    .nav-button-group {
+        display: flex !important;
+        flex-direction: row !important;
+        justify-content: space-between !important;
+        gap: 8px !important;
+    }
+
+    .nav-button-group .tab-button {
+        flex: 1 !important;
+        padding: 10px 5px !important;
+        font-size: 11px !important;
+        text-align: center !important;
+        border-radius: 12px !important;
+        background: #f8fafc !important;
+        color: #64748b !important;
+        border: 1px solid transparent !important;
+        margin-top: 0 !important;
+    }
+
+    .nav-button-group .tab-button.active {
+        background: #eff6ff !important;
+        color: #1d4ed8 !important;
+        border: 1px solid rgba(59, 130, 246, 0.18) !important;
+    }
+
+    /* 4. PARKING GRID SCROLL SYSTEM (iPad Air Feel) */
+    .parking-grid-container {
+        display: block !important;
+        width: 100% !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 15px;
+    }
+
+    /* Pilitin ang Grid na maging horizontal lane imbes na mag-stack */
+    .parking-grid {
+        display: grid !important;
+        /* I-adjust ang '10' base sa slotsPerRow ng area mo */
+        grid-template-columns: repeat(10, 120px) !important; 
+        gap: 15px !important;
+        width: max-content !important; 
+        padding: 20px 10px !important;
+        flex-direction: unset !important;
+    }
+
+    /* 5. PARKING SLOT STYLING */
+    .parking-slot, 
+    button[style*="minHeight"] {
+        width: 120px !important;
+        min-height: 140px !important;
+        margin: 0 !important;
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: center !important;
+        align-items: center !important;
+        padding: 8px !important;
+    }
+
+    .parking-slot div {
+        font-size: 12px !important;
+    }
+
+    /* 6. GLOBAL MOBILE TWEAKS */
+    .dashboard-card, .panel {
+        overflow-x: hidden !important; /* Main content vertical only */
+    }
+    
+    .parking-grid-scroll-wrap {
+        overflow-x: auto !important;
+        width: 100% !important;
+        padding: 5px;
+    }
 }
 
-.stat-card h3 {
-    font-size: 0.7rem;
-    color: #64748b;
-    margin-bottom: 5px;
+/* FORCE STACKING FOR MOBILE */
+@media (max-width: 480px) {
+    /* Hanapin ang container na may flex at gawing column */
+    .admin-layout, 
+    div[style*="display: flex"] {
+        flex-direction: column !important;
+        align-items: stretch !important;
+    }
+
+    /* Siguraduhin na ang Navigation at ang Content ay 100% ang lapad */
+    .user-nav-panel,
+    .admin-tabs,
+    .admin-main,
+    div[style*="flex: 1"],
+    div[style*="flex: 0 0"] {
+        width: 100% !important;
+        max-width: 100% !important;
+        flex: none !important; /* Binabasag nito ang side-by-side rule */
+        margin-bottom: 15px;
+    }
+
+    /* Para hindi lumabas sa screen yung dambuhalang parking grid */
+    .parking-grid-container,
+    div[style*="overflowX: auto"] {
+        width: 100% !important;
+        display: block !important;
+        overflow-x: auto !important; /* Dito papasok yung scroll sa grid lang */
+    }
 }
 
-.stat-card p {
-    font-size: 1.5rem;
-    font-weight: 800;
-    margin: 0;
-}
 
-/* Fix for Button Spacing in Topbar */
-.topbar-actions {
-    display: flex;
-    gap: 15px; /* Separation between Refresh and Logout */
-}
-
-/* Table Text Colors */
-.sticker-id-text {
-    color: #2563eb;
-    font-weight: 800;
-}
-
-.bold-plate {
-    font-family: 'Courier New', Courier, monospace;
-    font-weight: 800;
-}
-
-/* Ensure the center container allows for full width */
+/* 1. DAGDAGAN ANG GAP SA WELCOME (Para hindi dikit sa gilid) */
 .center {
     display: flex;
     justify-content: center;
     align-items: flex-start;
     min-height: 100vh;
     width: 100%;
-    padding: 20px;
+    padding: 40px 30px !important; /* Tinaasan ko padding sa gilid (30px) */
+}
+
+/* 2. IPAD AIR / TABLET SPECIFIC FIX (820px and above) */
+@media (min-width: 431px) {
+    .topbar {
+        display: flex !important;
+        flex-direction: row !important; /* Piliting mag-horizontal sa iPad */
+        justify-content: space-between !important;
+        align-items: center !important;
+        width: 100% !important;
+    }
+
+    .topbar-actions {
+        display: flex !important;
+        flex-direction: row !important; /* Horizontal buttons */
+        align-items: center !important;
+        gap: 12px !important;
+        margin: 0 !important;
+    }
+
+    .welcome-row {
+        text-align: left !important;
+        align-items: flex-start !important;
+    }
+}
+
+/* 3. IPHONE FIX (Keep it as is pero double check natin) */
+@media (max-width: 430px) {
+    .topbar {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+    }
+    /* ... keep your other iPhone specific codes here ... */
 }
 
 
-/* SETTINGS */
-
-.modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    background: rgba(0, 0, 0, 0.5); /* Dim the background */
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 1000;
+/* Siguraduhin na ang lahat ng select (dropdown) ay kakain ng buong width ng container */
+select {
+    width: 100% !important;
+    display: block !important;
+    box-sizing: border-box !important; /* Para hindi lumampas kahit may padding */
 }
 
-.modal-content {
-    background: var(--bg);
-    padding: 25px;
-    border-radius: 12px;
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2);
+/* Specific target para sa Vehicle Type dropdown kung ayaw mo madamay lahat */
+.panel select {
+    width: 100% !important;
+    padding: 10px 11px !important; /* I-match natin sa padding ng input */
 }
 
-.small-label {
-    display: block; 
-    text-align: left; 
-    font-size: 0.8rem; 
-    font-weight: 600; 
-    color: #64748b;
+
+@media (max-width: 430px) {
+    /* 1. Bawasan ang gap sa pinaka-container ng buong page */
+    .center {
+        padding: 10px 8px !important; /* Mula 20px-30px, ginawa nating 8px na lang sa gilid */
+    }
+
+    /* 2. Siguraduhin na ang card ay sasagad sa width */
+    .card, .dashboard-card, .admin-large-card {
+        width: 100% !important;
+        max-width: 100% !important;
+        margin: 0 !important;
+        padding: 15px 12px !important; /* Paliitin din padding sa loob ng card para mas siksik */
+        border-radius: 12px !important; /* Optional: mas maliit na kanto para mas modern sa mobile */
+    }
+
+    /* 3. Bawasan ang gaps sa header elements */
+    .header-banner {
+        margin-bottom: 10px !important;
+        padding: 10px 0 !important;
+    }
+
+    .header-banner img {
+        width: 50px !important; /* Paliitin ng konti yung logo para tipid sa space */
+        height: 50px !important;
+    }
+
+    .brand-title {
+        font-size: 1.1rem !important;
+    }
+
+    /* 4. Paliitin ang gaps sa pagitan ng mga sections/panels */
+    .panel {
+        margin-bottom: 10px !important;
+        padding: 12px !important;
+    }
+}
+
+@media (max-width: 430px) {
+    /* I-center ang header content */
+    .topbar {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        text-align: center !important;
+        gap: 10px !important;
+    }
+
+    /* Horizontal alignment para sa Bell at Logout */
+    .topbar-actions {
+        display: flex !important;
+        flex-direction: row !important; /* Side-by-side */
+        justify-content: center !important;
+        align-items: center !important;
+        gap: 12px !important; /* Eksaktong gap para sa dalawang buttons */
+        margin: 5px 0 15px 0 !important;
+    }
+
+    /* Bell Icon size */
+    .topbar-actions .bell-btn {
+        width: 45px !important;
+        height: 45px !important;
+        border-radius: 12px !important;
+        padding: 0 !important;
+        display: grid !important;
+        place-items: center !important;
+    }
+
+    /* Logout Button - Gawing saktong haba lang */
+    .topbar-actions .btn-blue {
+        height: 45px !important;
+        padding: 0 20px !important;
+        width: auto !important;
+        border-radius: 12px !important;
+        font-size: 14px !important;
+        margin-top: 0 !important; /* Tanggalin ang default margin */
+    }
+
+    /* Notification Badge position adjustment */
+    .notif-count {
+        top: 2px !important;
+        right: 2px !important;
+    }
+}
+
+/* --- UPDATED AUTH CENTERING --- */
+.auth-center {
+    display: flex !important;
+    flex-direction: column !important; /* Stack vertically */
+    justify-content: center !important; /* Eto yung magpapagitna vertically */
+    align-items: center !important;     /* Eto yung magpapagitna horizontally */
+    min-height: 100vh !important;       /* Gamitin ang buong height ng screen */
+    padding: 20px !important;           /* Iwas dikit sa bezel ng phone */
+    box-sizing: border-box !important;
+}
+
+/* Siguraduhin na ang card ay hindi "lalutang" sa taas */
+.auth-center .card {
+    margin: 0 auto !important;
+    width: 100%;
+    max-width: 480px; /* Saktong laki lang para sa mobile at desktop */
+}
+
+/* Mobile specific adjustment */
+@media (max-width: 430px) {
+    .auth-center {
+        padding: 10px !important;
+        /* Bawasan ng konti yung height kung may virtual keyboard na lumalabas */
+        min-height: calc(100vh - 20px) !important; 
+    }
 }

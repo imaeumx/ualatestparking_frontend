@@ -906,3 +906,34 @@ select {
         min-height: calc(100vh - 20px) !important; 
     }
 }
+
+
+/* --- NOTIFICATION DROPDOWN FIX --- */
+
+/* 1. Siguraduhin na ang wrapper ng buttons ay ang anchor ng dropdown */
+.topbar-actions {
+    position: relative !important; /* Ito ang anchor point */
+}
+
+/* 2. I-position ang dropdown sa ILALIM ng buttons */
+.notif-dropdown {
+    position: absolute !important;
+    top: 100% !important; /* Lalabas siya sa mismong ilalim ng button group */
+    right: 0 !important;   /* Nakalinya sa kanang gilid ng logout button */
+    margin-top: 10px !important;
+    width: 320px !important; /* Saktong laki lang */
+    z-index: 2000 !important; /* Siguradong nasa ibabaw ng lahat */
+    box-shadow: 0 15px 35px rgba(15, 23, 42, 0.2) !important;
+}
+
+/* 3. Mobile Specific Adjustment (Para sa iPhone 14 Pro Max) */
+@media (max-width: 430px) {
+    .notif-dropdown {
+        position: fixed !important; /* Gawin nating fixed sa mobile para hindi tabingi */
+        top: 80px !important;       /* Tantyahin ang baba ng logo/welcome area */
+        left: 5% !important;
+        right: 5% !important;
+        width: 90% !important;      /* Halos full width sa mobile para malinis tignan */
+        margin: 0 auto !important;
+    }
+}

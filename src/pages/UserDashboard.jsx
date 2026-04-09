@@ -575,7 +575,7 @@ export default function UserDashboard() {
         }
     };
 
-    const handleGuardReleaseReservation = () => {
+    const handleGuardReleaseReservation = async () => {
         const selectedSlot = getSelectedParkingSlot();
         if (!selectedSlot) return;
 
@@ -583,6 +583,52 @@ export default function UserDashboard() {
         if (!reservationInfo || !reservationInfo.isOverdue) {
             showError('Only overdue reservations can be released.');
             return;
+        }
+
+        const parseSpots = (res) => {
+            let spots = [];
+            if (Array.isArray(res.reserved_spots)) {
+                spots = res.reserved_spots;
+            } else {
+                try { spots = JSON.parse(res.reserved_spots || '[]'); } catch { spots = []; }
+            }
+            return spots.map(s => parseInt(s, 10)).filter(s => !Number.isNaN(s));
+        };
+
+        const matchingReservation = userReservations.find(res => {
+            if ((res.status || '').toLowerCase() !== 'approved') return false;
+            const resTime = new Date(res.reserved_for_datetime).getTime();
+            const slotTime = new Date(selectedSlot.reservedFor).getTime();
+            if (resTime !== slotTime) return false;
+            const spots = parseSpots(res);
+            return spots.includes(selectedSlot.id);
+        });
+
+        if (matchingReservation) {
+            try {
+                await axios.post('http://127.0.0.1:8000/api/update-reservation-admin/', {
+                    reservation_id: matchingReservation.id,
+                    status: 'cancelled',
+                    admin_notes: 'Released due to no-show',
+                    requester_username: user.username,
+                    auth_token: user.authToken || ''
+                });
+
+                const spotsToRelease = parseSpots(matchingReservation);
+                const updatedSlots = parkingSlots.map(slot =>
+                    spotsToRelease.includes(slot.id)
+                        ? { ...slot, reservedStickerId: '', reservedFor: null }
+                        : slot
+                );
+                setParkingSlots(updatedSlots);
+                localStorage.setItem('parkingSlots', JSON.stringify(updatedSlots));
+                fetchUserReservations();
+                showInfo(`Reservation cancelled. Spot(s) ${spotsToRelease.join(', ')} released.`);
+                return;
+            } catch (err) {
+                // Optional fallback log, but we'll fall through to local storage clear below
+                console.error("Backend failed cancel: ", err);
+            }
         }
 
         const updatedSlots = parkingSlots.map(slot =>

@@ -539,7 +539,7 @@ export default function AdminPanel() {
     };
 
     // Guard/admin manual release for overdue reservations after verification of no-show.
-    const releaseOverdueReservation = (slotId) => {
+    const releaseOverdueReservation = async (slotId) => {
         const targetSlot = parkingSlots.find(slot => slot.id === slotId);
         if (!targetSlot) {
             showError('Slot not found.');
@@ -552,6 +552,54 @@ export default function AdminPanel() {
             return;
         }
 
+        // 1. Locate the formal backend reservation matching this slot marker
+        const matchingReservation = pendingReservations.find(res => {
+            if ((res.status || '').toLowerCase() !== 'approved') return false;
+            
+            // Match exactly same reservation time to avoid pulling wrong ones
+            const resTime = new Date(res.reserved_for_datetime).getTime();
+            const slotTime = new Date(targetSlot.reservedFor).getTime();
+            if (resTime !== slotTime) return false;
+            
+            // Validate spot is claimed by this reservation
+            const spots = parseReservationSpots(res);
+            return spots.includes(slotId);
+        });
+
+        if (matchingReservation) {
+            try {
+                // 2. Formally cancel via backend
+                await axios.post('http://127.0.0.1:8000/api/update-reservation-admin/', {
+                    reservation_id: matchingReservation.id,
+                    status: 'cancelled',
+                    admin_notes: 'Released by personnel due to no-show',
+                    requester_username: currentUser.username,
+                    auth_token: currentUser.authToken || ''
+                });
+
+                // 3. Purge all spots that belong to this reservation so we don't have to clear them 1 by 1
+                const spotsToRelease = parseReservationSpots(matchingReservation);
+                const updatedSlots = parkingSlots.map(slot => 
+                    spotsToRelease.includes(slot.id)
+                        ? { ...slot, reservedFor: null, reservedStickerId: '' }
+                        : slot
+                );
+
+                setParkingSlots(updatedSlots);
+                localStorage.setItem('parkingSlots', JSON.stringify(updatedSlots));
+                
+                // Keep UI fully synced instantly
+                fetchPendingReservations();
+                addParkingLog('reservation_release', targetSlot, `Released ${spotsToRelease.length} spots automatically after 30-minute no-show check.`);
+                showInfo(`Reservation cancelled. Spot(s) ${spotsToRelease.join(', ')} released.`);
+                return;
+            } catch (err) {
+                showError('Failed backend reservation sync. Please check network.');
+                return;
+            }
+        }
+
+        // Fallback: If we couldn't resolve exactly which reservations matched, safely clear just this slot
         const updatedSlots = parkingSlots.map(slot =>
             slot.id === slotId
                 ? { ...slot, reservedFor: null, reservedStickerId: '' }
@@ -1541,7 +1589,7 @@ export default function AdminPanel() {
 
                 <div className="panel">
                     <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                        <div style={{ flex: '1 1 780px', minWidth: '780px' }}>
+                        <div style={{ flex: '1 1 100%', minWidth: 0, overflowX: 'auto' }}>
                             <h3>{selectedParkingArea.name} List</h3>
                             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '10px' }}>
                                 <input

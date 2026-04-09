@@ -95,6 +95,20 @@ export default function Login() {
             });
 
             if (res.data.status === 'success') {
+                // Normalize role text so comparison is case-insensitive.
+                const normalizedRole = (res.data.user.role || '').toLowerCase();
+                const isPersonnel = ['root_admin', 'admin', 'guard'].includes(normalizedRole);
+
+                // Enforce that the selected login tab matches their actual DB role
+                if (loginRole === 'admin' && !isPersonnel) {
+                    showError("Access denied: Account does not have Personnel privileges.");
+                    return;
+                }
+                if (loginRole === 'user' && isPersonnel) {
+                    showError("Access denied: Please use the Personnel tab to log in with this account.");
+                    return;
+                }
+
                 // Persist lightweight session in localStorage for later page reloads.
                 const userSession = { 
                     username: res.data.user.username, 
@@ -106,11 +120,8 @@ export default function Login() {
                 };
                 localStorage.setItem('currentUser', JSON.stringify(userSession));
 
-                // Normalize role text so comparison is case-insensitive.
-                const normalizedRole = (res.data.user.role || '').toLowerCase();
-
                 // Route personnel roles to personnel dashboard; others to user dashboard.
-                if (['root_admin', 'admin', 'guard'].includes(normalizedRole)) {
+                if (isPersonnel) {
                     navigate('/personnel');
                 } else {
                     navigate('/user');

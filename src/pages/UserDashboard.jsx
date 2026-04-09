@@ -4,6 +4,7 @@ import axios from 'axios';
 import { usePopup } from '../components/PopupContext';
 import ParkingManagement from '../components/ParkingManagement';
 import { encryptDES, decryptDES } from '../utils/desCrypto';
+import API_BASE_URL from '../config/api';
 import ualogo from '../assets/ualogo.png';
 
 /**
@@ -306,7 +307,7 @@ export default function UserDashboard() {
     const fetchUserRecords = async (username) => {
         try {
             const authToken = user?.authToken || JSON.parse(localStorage.getItem('currentUser') || 'null')?.authToken || '';
-            const res = await axios.get('http://127.0.0.1:8000/api/user-records/', {
+            const res = await axios.get(`${API_BASE_URL}/user-records/`, {
                 params: {
                     username,
                     auth_token: authToken
@@ -324,7 +325,7 @@ export default function UserDashboard() {
     const fetchUserReservations = async (username) => {
         try {
             const authToken = user?.authToken || JSON.parse(localStorage.getItem('currentUser') || 'null')?.authToken || '';
-            const res = await axios.get('http://127.0.0.1:8000/api/user-reservations/', {
+            const res = await axios.get(`${API_BASE_URL}/user-reservations/`, {
                 params: {
                     username,
                     auth_token: authToken
@@ -567,7 +568,7 @@ export default function UserDashboard() {
     const markAsRead = async () => {
         const unreadReservationKeys = unreadReservationStatusNotifs.map((notif) => notif.key);
         try {
-            await axios.post('http://127.0.0.1:8000/api/mark-notifications-read/', {
+            await axios.post(`${API_BASE_URL}/mark-notifications-read/`, {
                 username: user.username,
                 auth_token: user.authToken || ''
             });
@@ -629,7 +630,7 @@ export default function UserDashboard() {
                 updateData.password = newPassword.trim();
             }
 
-            await axios.post('http://127.0.0.1:8000/api/update-profile/', updateData);
+            await axios.post(`${API_BASE_URL}/update-profile/`, updateData);
             
             if (wantsPasswordChange) {
                 showSuccess("Password changed! Please log in again.");
@@ -661,7 +662,7 @@ export default function UserDashboard() {
         const encOwner = encryptDES(displayFullName);
         
         try {
-            await axios.post('http://127.0.0.1:8000/api/submit-vehicle/', {
+            await axios.post(`${API_BASE_URL}/submit-vehicle/`, {
                 username: user.username,
                 auth_token: user.authToken || '',
                 ownerName: encOwner,

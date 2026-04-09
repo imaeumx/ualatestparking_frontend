@@ -14,3 +14,13 @@ The React Compiler is not enabled on this template because of its impact on dev 
 ## Expanding the ESLint configuration
 
 If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+
+## Render Deployment
+
+Create a `.env` file at the project root with:
+
+```env
+VITE_API_BASE_URL=https://ualatestparking_backend.onrender.com/api
+```
+
+On Render, set the same `VITE_API_BASE_URL` environment variable for the frontend service, then deploy the Vite build command `npm run build` and publish directory `dist`.

@@ -5,6 +5,7 @@ import ParkingReservationPanel from './ParkingReservationPanel';
 import ReservationModal from './ReservationModal';
 import StickerManagement from './StickerManagement';
 import { encryptDESStable } from '../utils/desCrypto';
+import API_BASE_URL from '../config/api';
 
 /**
  * ParkingManagement Component
@@ -180,7 +181,7 @@ export default function ParkingManagement({
 
             try {
                 // Pulling approved reservations keeps the map synchronized across all users.
-                const response = await axios.get('http://127.0.0.1:8000/api/approved-reservations-map/', {
+                const response = await axios.get(`${API_BASE_URL}/approved-reservations-map/`, {
                     params: {
                         auth_token: authToken
                     }
@@ -696,7 +697,7 @@ export default function ParkingManagement({
             // Close modal immediately after submit click for snappier UX.
                 setShowReservationModal(false);
 
-                const response = await axios.post('http://127.0.0.1:8000/api/submit-reservation/', {
+                const response = await axios.post(`${API_BASE_URL}/submit-reservation/`, {
                     username: user.username,
                     auth_token: user.authToken || JSON.parse(localStorage.getItem('currentUser') || 'null')?.authToken || '',
                     sticker_id: sticker,

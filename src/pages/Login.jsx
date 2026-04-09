@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { usePopup } from '../components/PopupContext';
+import API_BASE_URL from '../config/api';
 import ualogo from '../assets/ualogo.png';
 
 const PasswordEyeIcon = ({ hidden }) => (
@@ -115,7 +116,7 @@ export default function Login() {
         // Unified login endpoint; backend decides if credentials are valid.
         try {
             // Trim values to avoid accidental spaces causing failed login attempts.
-            const res = await axios.post('http://127.0.0.1:8000/api/login/', {
+            const res = await axios.post(`${API_BASE_URL}/login/`, {
                 username: username.trim(),
                 password: password.trim() // Plain text sent over local/dev HTTP API.
             });
@@ -194,7 +195,7 @@ export default function Login() {
 
         try {
             // Create user account in backend.
-            const res = await axios.post('http://127.0.0.1:8000/api/register/', newUser);
+            const res = await axios.post(`${API_BASE_URL}/register/`, newUser);
             if (res.data.status === 'success') {
                 showSuccess("Account created successfully! You can now Login.");
 

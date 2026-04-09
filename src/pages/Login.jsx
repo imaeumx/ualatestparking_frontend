@@ -4,6 +4,30 @@ import axios from 'axios';
 import { usePopup } from '../components/PopupContext';
 import ualogo from '../assets/ualogo.png';
 
+const PasswordEyeIcon = ({ hidden }) => (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" className="password-eye-icon">
+        <path
+            d="M2.2 12s3.6-6.2 9.8-6.2S21.8 12 21.8 12s-3.6 6.2-9.8 6.2S2.2 12 2.2 12Z"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+        <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" strokeWidth="1.8" />
+        {hidden && (
+            <path
+                d="M4 4l16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.9"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            />
+        )}
+    </svg>
+);
+
 /**
  * Login Page
  *
@@ -39,6 +63,8 @@ export default function Login() {
     // Shared credential inputs used by both login and registration.
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
+    const [showLoginPassword, setShowLoginPassword] = useState(false);
+    const [showRegisterPassword, setShowRegisterPassword] = useState(false);
     
     // Registration profile fields.
     const [fName, setFName] = useState('');
@@ -185,72 +211,78 @@ export default function Login() {
     };
 
     return (
-        // Centered auth card container.
-        <div className="center dashboard-bg auth-center">
-            <div className="card">
-                <div className="header-banner">
-                    <img src={ualogo} alt="UA Logo" />
-                    <div>
-                        <div className="brand-title">University of the Assumption</div>
-                        <div className="brand-subtitle">UA Parking Portal</div>
-                    </div>
+        <div className="login-split-page">
+            <div className="login-visual-panel">
+                <div className="login-visual-brand">
+                    <img src={ualogo} alt="UA Logo" className="login-visual-logo" />
+                    <div className="login-visual-title">University of the Assumption</div>
+                    <div className="login-visual-subtitle">UA Parking Portal</div>
                 </div>
-                <p className="subtitle" style={{ textAlign: 'center' }}>Secure Vehicle & User Access</p>
+            </div>
 
-                {!isRegistering ? (
-                    // LOGIN VIEW
-                    <div className="login-box">
-                        <div className="panel">
-                            <h3>Login As</h3>
-                            <div className="role-tabs">
+            <div className="login-form-panel">
+                <div className="card login-auth-card">
+                    <h2 className="login-form-title">
+                        {isRegistering ? 'Create UA Parking Account' : 'Login to UA Parking Portal'}
+                    </h2>
+
+                    {!isRegistering ? (
+                        <div className="login-box">
+                            <div className="role-tabs login-role-tabs">
                                 {/* UI-only role tab for user context; backend still validates actual role */}
                                 <button className={`role-tab ${loginRole === 'user' ? 'active' : ''}`} onClick={() => setLoginRole('user')}>Student / Non-Student</button>
                                 <button className={`role-tab ${loginRole === 'admin' ? 'active' : ''}`} onClick={() => setLoginRole('admin')}>Personnel</button>
                             </div>
-                        </div>
 
-                        <div className="panel">
-                            <h3>Credentials</h3>
-                            <input 
-                                type="text" 
-                                placeholder="Username" 
-                                value={username} 
-                                onChange={(e) => setUsername(e.target.value)}
-                                onKeyDown={handleLoginKeyPress}
-                            />
-                            <input 
-                                type="password" 
-                                placeholder="Password" 
-                                value={password} 
-                                onChange={(e) => setPassword(e.target.value)}
-                                onKeyDown={handleLoginKeyPress}
-                            />
-                            <button className="btn-blue" onClick={handleLogin} style={{ width: '100%', marginTop: '10px' }}>Login to Portal</button>
-                            <p className="auth-switch" style={{ textAlign: 'center', marginTop: '15px' }}>
-                                {/* Switch to registration mode */}
+                            <div className="login-fields">
+                                <input
+                                    type="text"
+                                    placeholder="Username"
+                                    value={username}
+                                    onChange={(e) => setUsername(e.target.value)}
+                                    onKeyDown={handleLoginKeyPress}
+                                />
+                                <div className="password-field">
+                                    <input
+                                        type={showLoginPassword ? 'text' : 'password'}
+                                        placeholder="Password"
+                                        value={password}
+                                        onChange={(e) => setPassword(e.target.value)}
+                                        onKeyDown={handleLoginKeyPress}
+                                        className="password-field-input"
+                                    />
+                                    <button
+                                        type="button"
+                                        className="password-toggle-btn"
+                                        onClick={() => setShowLoginPassword((prev) => !prev)}
+                                        aria-label={showLoginPassword ? 'Hide password' : 'Show password'}
+                                    >
+                                        <PasswordEyeIcon hidden={!showLoginPassword} />
+                                    </button>
+                                </div>
+                                <button className="btn-blue login-submit-btn" onClick={handleLogin}>Login</button>
+                            </div>
+
+                            <p className="auth-switch login-switch-row">
                                 New here? <button className="link-btn" onClick={() => setIsRegistering(true)}>Register</button>
                             </p>
                         </div>
-                    </div>
-                ) : (
-                    // REGISTRATION VIEW
-                    <div className="register-box">
-                        <div className="panel">
-                            <h3>Create Account</h3>
-                            <div className="role-tabs">
+                    ) : (
+                        <div className="register-box">
+                            <div className="role-tabs login-role-tabs">
                                 {/* Role toggle changes which extra fields appear below */}
                                 <button className={`role-tab ${regRole === 'student' ? 'active' : ''}`} onClick={() => setRegRole('student')}>Student</button>
                                 <button className={`role-tab ${regRole === 'guest' ? 'active' : ''}`} onClick={() => setRegRole('guest')}>Non-Student</button>
                             </div>
 
-                            <div className="action-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '15px' }}>
+                            <div className="action-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '10px' }}>
                                 <input type="text" placeholder="First Name" value={fName} onChange={(e) => setFName(e.target.value)} />
                                 <input type="text" placeholder="Last Name" value={lName} onChange={(e) => setLName(e.target.value)} />
                             </div>
 
-                            <div style={{ marginTop: '10px' }}>
+                            <div style={{ marginTop: '4px' }}>
                                 {regRole === 'student' ? (
-                                    <div className="student-info" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                    <div className="student-info" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                         {/* Student-only identity fields */}
                                         <input type="text" placeholder="Student ID" value={studentId} onChange={(e) => setStudentId(e.target.value)} />
                                         <select value={level} onChange={(e) => setLevel(e.target.value)}>
@@ -279,25 +311,34 @@ export default function Login() {
                                 )}
                             </div>
 
-                            <input type="email" placeholder="Email" value={email} style={{ marginTop: '10px' }} onChange={(e) => setEmail(e.target.value)} />
-                            <input type="text" placeholder="Username" value={username} style={{ marginTop: '10px' }} onChange={(e) => setUsername(e.target.value)} />
-                            <input 
-                                type="password" 
-                                placeholder="Password" 
-                                value={password} 
-                                style={{ marginTop: '10px' }} 
-                                onChange={(e) => setPassword(e.target.value)}
-                                onKeyDown={handleRegisterKeyPress}
-                            />
-                            
-                            <button className="btn-green" onClick={handleRegister} style={{ width: '100%', marginTop: '20px' }}>Create Account</button>
-                            <p className="auth-switch" style={{ textAlign: 'center', marginTop: '15px' }}>
-                                {/* Switch back to login mode */}
+                            <input type="email" placeholder="Email" value={email} style={{ marginTop: '8px' }} onChange={(e) => setEmail(e.target.value)} />
+                            <input type="text" placeholder="Username" value={username} style={{ marginTop: '8px' }} onChange={(e) => setUsername(e.target.value)} />
+                            <div className="password-field" style={{ marginTop: '8px' }}>
+                                <input
+                                    type={showRegisterPassword ? 'text' : 'password'}
+                                    placeholder="Password"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    onKeyDown={handleRegisterKeyPress}
+                                    className="password-field-input"
+                                />
+                                <button
+                                    type="button"
+                                    className="password-toggle-btn"
+                                    onClick={() => setShowRegisterPassword((prev) => !prev)}
+                                    aria-label={showRegisterPassword ? 'Hide password' : 'Show password'}
+                                >
+                                    <PasswordEyeIcon hidden={!showRegisterPassword} />
+                                </button>
+                            </div>
+
+                            <button className="btn-green login-submit-btn" onClick={handleRegister}>Create Account</button>
+                            <p className="auth-switch login-switch-row">
                                 Have an account? <button className="link-btn" onClick={() => setIsRegistering(false)}>Login</button>
                             </p>
                         </div>
-                    </div>
-                )}
+                    )}
+                </div>
             </div>
         </div>
     );

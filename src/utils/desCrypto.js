@@ -78,6 +78,25 @@ export function encryptDES(plainText) {
 }
 
 /**
+ * Deterministic DES encryption for display-only masking.
+ * Same input with same key always produces the same ciphertext.
+ * This is useful for UI masking where repeated values should look consistent.
+ */
+export function encryptDESStable(plainText) {
+    const normalizedValue = plainText == null ? '' : String(plainText);
+    if (!normalizedValue) return '';
+
+    const normalizedKey = CryptoJS.enc.Utf8.parse(
+        DES_SECRET_KEY.slice(0, 8).padEnd(8, '0')
+    );
+
+    return CryptoJS.DES.encrypt(normalizedValue, normalizedKey, {
+        mode: CryptoJS.mode.ECB,
+        padding: CryptoJS.pad.Pkcs7
+    }).toString();
+}
+
+/**
  * FUNCTION: decryptDES
  * 
  * Convert encrypted gibberish back into readable plain text.

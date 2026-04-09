@@ -51,10 +51,12 @@ export default function AdminPanel() {
     const [activeVerify, setActiveVerify] = useState('');
     const [verifySecretKeyInput, setVerifySecretKeyInput] = useState('');
     const [hasValidVerifyKey, setHasValidVerifyKey] = useState(false);
+    const VERIFY_KEY_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 
     // UI state
     // activeTab chooses which major section is rendered.
     const [activeTab, setActiveTab] = useState('applications');
+    const [applicationMiniTab, setApplicationMiniTab] = useState('pending');
 
     // Parking management state
     const [parkingSlots, setParkingSlots] = useState([]);
@@ -66,15 +68,20 @@ export default function AdminPanel() {
     const [parkingStatusFilter, setParkingStatusFilter] = useState('all');
     const [parkingListPage, setParkingListPage] = useState(1);
     const [applicationsPage, setApplicationsPage] = useState(1);
+    const [applicationStatusFilter, setApplicationStatusFilter] = useState('all');
+    const [applicationRoleFilter, setApplicationRoleFilter] = useState('all');
     const [reservationsPage, setReservationsPage] = useState(1);
     const [logsPage, setLogsPage] = useState(1);
+    const [applicationModalOpen, setApplicationModalOpen] = useState(false);
+    const [applicationModalRecord, setApplicationModalRecord] = useState(null);
+    const [applicationModalNotes, setApplicationModalNotes] = useState('');
+    const [isSavingApplicationEdit, setIsSavingApplicationEdit] = useState(false);
 
     // Reservation management state
     // pendingReservations stores all fetched reservations; mini-tab filters list view.
     // editing* states control inline admin edits (status + notes + save spinner).
     const [pendingReservations, setPendingReservations] = useState([]);
     const [reservationMiniTab, setReservationMiniTab] = useState('pending');
-    const [editingReservationId, setEditingReservationId] = useState(null);
     const [editReservationStatus, setEditReservationStatus] = useState('pending');
     const [editReservationNotes, setEditReservationNotes] = useState('');
     const [isSavingReservationEdit, setIsSavingReservationEdit] = useState(false);
@@ -84,7 +91,7 @@ export default function AdminPanel() {
     const [personnelNotifItems, setPersonnelNotifItems] = useState([]);
     const [readPersonnelNotifKeys, setReadPersonnelNotifKeys] = useState([]);
     const [reasonModalOpen, setReasonModalOpen] = useState(false);
-    const [reasonModalText, setReasonModalText] = useState('');
+    const [reasonModalReservation, setReasonModalReservation] = useState(null);
 
     // Root admin personnel creation form state.
     const [personnelFirstName, setPersonnelFirstName] = useState('');
@@ -255,6 +262,62 @@ export default function AdminPanel() {
             .filter((spotId) => !Number.isNaN(spotId));
     };
 
+    // Break the stored reservation reason into labeled fields so the popup can
+    // present it as a proper form-style layout.
+    const parseReservationReasonDetails = (reasonText) => {
+        const normalizedReason = (reasonText || '').trim();
+        if (!normalizedReason) {
+            return { fields: [], extraText: '' };
+        }
+
+        const segments = normalizedReason
+            .split('|')
+            .map((segment) => segment.trim())
+            .filter(Boolean);
+
+        const labelMap = {
+            category: 'Category',
+            'plate number': 'Plate Number',
+            org: 'Org Name',
+            organization: 'Organization Name',
+            event: 'Event Name',
+            'activity form': 'Activity Form',
+            requester: 'Name of Person Requesting Reservation',
+            'requester name': 'Name of Person Requesting Reservation',
+            position: 'Org Position',
+            details: 'Detailed Reason'
+        };
+
+        const fields = [];
+        const extraSegments = [];
+
+        segments.forEach((segment) => {
+            const separatorIndex = segment.indexOf(':');
+            if (separatorIndex === -1) {
+                extraSegments.push(segment);
+                return;
+            }
+
+            const rawLabel = segment.slice(0, separatorIndex).trim();
+            const rawValue = segment.slice(separatorIndex + 1).trim();
+
+            if (!rawLabel || !rawValue) {
+                extraSegments.push(segment);
+                return;
+            }
+
+            fields.push({
+                label: labelMap[rawLabel.toLowerCase()] || rawLabel,
+                value: rawValue
+            });
+        });
+
+        return {
+            fields,
+            extraText: extraSegments.join(' | ')
+        };
+    };
+
     // Reflect admin reservation decision onto parkingSlots markers.
     // approved => attach reservedFor/reservedStickerId marker to targeted slots
     // non-approved => clear reservation marker only if it belongs to same reservation
@@ -297,28 +360,24 @@ export default function AdminPanel() {
 
     // Start inline edit mode for one reservation row.
     const beginReservationEdit = (reservation) => {
-        setEditingReservationId(reservation.id);
         setEditReservationStatus((reservation.status || 'pending').toLowerCase());
         setEditReservationNotes((reservation.admin_notes || '').trim());
     };
 
     // Cancel edit mode and reset temporary fields.
     const cancelReservationEdit = () => {
-        setEditingReservationId(null);
         setEditReservationStatus('pending');
         setEditReservationNotes('');
     };
 
-    // Persist admin reservation changes (status + notes) to backend.
-    // On success, sync local slot markers and refresh reservation list.
-    const saveReservationEdit = async (reservation) => {
-        if (!reservation) return;
+    const handleReasonModalDecision = async (nextStatus) => {
+        if (!reasonModalReservation) return;
 
         try {
             setIsSavingReservationEdit(true);
             const payload = {
-                reservation_id: reservation.id,
-                status: (editReservationStatus || (reservation.status || 'pending')).toLowerCase(),
+                reservation_id: reasonModalReservation.id,
+                status: (nextStatus || 'pending').toLowerCase(),
                 admin_notes: (editReservationNotes || '').trim(),
                 requester_username: currentUser.username,
                 auth_token: currentUser.authToken || ''
@@ -326,8 +385,10 @@ export default function AdminPanel() {
 
             const response = await axios.post('http://127.0.0.1:8000/api/update-reservation-admin/', payload);
             if (response.data.status === 'success') {
-                applyReservationToSlots(reservation, payload.status);
-                showInfo('Reservation updated successfully');
+                applyReservationToSlots(reasonModalReservation, payload.status);
+                showInfo(`Reservation ${payload.status} successfully`);
+                setReasonModalOpen(false);
+                setReasonModalReservation(null);
                 cancelReservationEdit();
                 fetchPendingReservations();
             } else {
@@ -368,7 +429,7 @@ export default function AdminPanel() {
         if (isGuard) {
             setActiveTab('parking');
         }
-    }, []);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
         // Minute ticker used to recompute overdue/escalation time-based UI.
@@ -421,20 +482,62 @@ export default function AdminPanel() {
     }, [TOTAL_PARKING_SLOTS]);
 
     /**
-     * Update application status (Approve/Reject/Reset).
+     * Update application status (Approve/Reject/Reopen).
      * Triggers backend update and refreshes data.
      */
-    const handleUpdateStatus = async (id, status) => {
+    const handleUpdateStatus = async (id, status, adminNotes = '') => {
         try {
             await axios.post('http://127.0.0.1:8000/api/update-status/', {
                 id,
                 status,
+                admin_notes: (adminNotes || '').trim(),
                 requester_username: currentUser.username,
                 auth_token: currentUser.authToken || ''
             });
             fetchData();
+            return true;
         } catch (err) {
             showError(err?.response?.data?.message || 'Update failed');
+            return false;
+        }
+    };
+
+    const openApplicationModal = (record) => {
+        setApplicationModalRecord(record);
+        setApplicationModalNotes((record?.admin_notes || '').trim());
+        setApplicationModalOpen(true);
+    };
+
+    const closeApplicationModal = () => {
+        setApplicationModalOpen(false);
+        setApplicationModalRecord(null);
+        setApplicationModalNotes('');
+        setIsSavingApplicationEdit(false);
+    };
+
+    const handleApplicationModalDecision = async (nextStatus) => {
+        if (!applicationModalRecord) return;
+
+        const normalizedStatus = (nextStatus || '').toLowerCase();
+        const trimmedNotes = (applicationModalNotes || '').trim();
+
+        // Require context for rejections so the applicant can see why it was declined.
+        if (normalizedStatus === 'rejected' && !trimmedNotes) {
+            showError('Please add notes before rejecting an application.');
+            return;
+        }
+
+        try {
+            setIsSavingApplicationEdit(true);
+            const saved = await handleUpdateStatus(applicationModalRecord.id, nextStatus, trimmedNotes);
+            if (saved) {
+                closeApplicationModal();
+                showInfo(`Application ${normalizedStatus} successfully`);
+            }
+        } catch (err) {
+            showError(err?.response?.data?.message || 'Update failed');
+        } finally {
+            setIsSavingApplicationEdit(false);
         }
     };
 
@@ -443,7 +546,7 @@ export default function AdminPanel() {
     const clearVerify = () => { setVerifyInput(''); setActiveVerify(''); };
 
     const handleVerifySecretKey = () => {
-        // Manual key gate for non-admin users to reveal decrypted verify values.
+        // Manual key gate for personnel users to reveal DES-decrypted values.
         if ((verifySecretKeyInput || '').trim() === 'UA-SECRET-KEY') {
             setHasValidVerifyKey(true);
             showInfo('Valid secret key. Decrypted verify view enabled.');
@@ -475,6 +578,13 @@ export default function AdminPanel() {
 
     // Append one parking event to local log history (keeps latest 300 entries).
     const addParkingLog = (eventType, slot, notes = '') => {
+        const isRootAdminActor = (currentUser.role || '').toLowerCase() === 'root_admin';
+        const actorFirstName = (currentUser.firstName || currentUser.first_name || '').trim();
+        const actorLastName = (currentUser.lastName || currentUser.last_name || '').trim();
+        const actorName = isRootAdminActor
+            ? 'rootadmin'
+            : `${actorFirstName} ${actorLastName}`.trim() || currentUser.username || 'personnel';
+
         const nextLog = {
             id: `${Date.now()}-${slot.id}`,
             timestamp: new Date().toISOString(),
@@ -482,13 +592,21 @@ export default function AdminPanel() {
             slotId: slot.id,
             plateNumber: slot.plateNumber || '',
             stickerId: slot.stickerId || '',
-            actor: currentUser.username || 'personnel',
+            actor: actorName,
             notes
         };
 
         const updatedLogs = [nextLog, ...parkingLogs].slice(0, 300);
         setParkingLogs(updatedLogs);
         localStorage.setItem('parkingLogs', JSON.stringify(updatedLogs));
+    };
+
+    const getParkingLogLabel = (eventType) => {
+        const normalizedEvent = (eventType || '').toLowerCase();
+        if (normalizedEvent === 'reservation_release') return 'Reservation Release';
+        if (normalizedEvent === 'park') return 'Park';
+        if (normalizedEvent === 'release') return 'Checkout';
+        return (eventType || '-').replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
     };
 
     // Build reservation timing state machine for one slot.
@@ -567,36 +685,20 @@ export default function AdminPanel() {
         });
 
         if (matchingReservation) {
-            try {
-                // 2. Formally cancel via backend
-                await axios.post('http://127.0.0.1:8000/api/update-reservation-admin/', {
-                    reservation_id: matchingReservation.id,
-                    status: 'cancelled',
-                    admin_notes: 'Released by personnel due to no-show',
-                    requester_username: currentUser.username,
-                    auth_token: currentUser.authToken || ''
-                });
+            // Only release the specific overdue slot. Keep the rest of the reservation intact.
+            const updatedSlots = parkingSlots.map(slot => 
+                slot.id === slotId
+                    ? { ...slot, reservedFor: null, reservedStickerId: '' }
+                    : slot
+            );
 
-                // 3. Purge all spots that belong to this reservation so we don't have to clear them 1 by 1
-                const spotsToRelease = parseReservationSpots(matchingReservation);
-                const updatedSlots = parkingSlots.map(slot => 
-                    spotsToRelease.includes(slot.id)
-                        ? { ...slot, reservedFor: null, reservedStickerId: '' }
-                        : slot
-                );
+            setParkingSlots(updatedSlots);
+            localStorage.setItem('parkingSlots', JSON.stringify(updatedSlots));
 
-                setParkingSlots(updatedSlots);
-                localStorage.setItem('parkingSlots', JSON.stringify(updatedSlots));
-                
-                // Keep UI fully synced instantly
-                fetchPendingReservations();
-                addParkingLog('reservation_release', targetSlot, `Released ${spotsToRelease.length} spots automatically after 30-minute no-show check.`);
-                showInfo(`Reservation cancelled. Spot(s) ${spotsToRelease.join(', ')} released.`);
-                return;
-            } catch (err) {
-                showError('Failed backend reservation sync. Please check network.');
-                return;
-            }
+            fetchPendingReservations();
+            addParkingLog('reservation_release', targetSlot, 'Released only this overdue spot after 30-minute no-show check.');
+            showInfo(`Spot ${slotId} released.`);
+            return;
         }
 
         // Fallback: If we couldn't resolve exactly which reservations matched, safely clear just this slot
@@ -765,7 +867,7 @@ export default function AdminPanel() {
         if (changed) {
             localStorage.setItem('personnelEscalationNotifs', JSON.stringify(personnelNotif.slice(-500)));
         }
-    }, [parkingSlots, timeTick]);
+    }, [parkingSlots, timeTick, showInfo]);
 
     useEffect(() => {
         // Build notification dropdown items from active escalations and keep
@@ -855,30 +957,57 @@ export default function AdminPanel() {
 
     // Dashboard counters and derived table lists.
     const pendingCount = records.filter(r => r.status === 'Pending').length;
+    const pendingApplicationCount = pendingCount;
+    const allApplicationCount = records.length;
     const approvedCount = records.filter(r => r.status === 'Approved').length;
     const totalRevenue = records.filter(r => r.status === 'Approved')
                                 .reduce((acc, curr) => acc + getFee(curr.vehicle_type), 0);
-    const allReservationCount = pendingReservations.length;
     const pendingReservationRows = pendingReservations.filter(
         (reservation) => (reservation.status || '').toLowerCase() === 'pending'
     );
     const pendingReservationCount = pendingReservationRows.length;
-    const displayedReservationRows = reservationMiniTab === 'pending' ? pendingReservationRows : pendingReservations;
+    const reviewedReservationRows = pendingReservations.filter(
+        (reservation) => ['approved', 'denied'].includes((reservation.status || '').toLowerCase())
+    );
+    const allReservationCount = reviewedReservationRows.length;
+    const displayedReservationRows = reservationMiniTab === 'pending' ? pendingReservationRows : reviewedReservationRows;
 
     const APPLICATIONS_PAGE_SIZE = 20;
     const RESERVATIONS_PAGE_SIZE = 20;
     const LOGS_PAGE_SIZE = 20;
 
+    // Root admin can always view plaintext; other personnel require secret-key unlock.
+    const canViewVerifyDecrypted = isRootAdmin || hasValidVerifyKey;
+    const getSensitiveText = (cipherText) => {
+        const normalizedValue = cipherText == null ? '' : String(cipherText);
+        if (!normalizedValue) return '---';
+        return canViewVerifyDecrypted ? decryptData(normalizedValue) : normalizedValue;
+    };
+
     const filteredApplicationRows = records
         .filter((record) => {
             if (activeVerify) return record.sticker_id === activeVerify;
-            return decryptData(record.plate_number).toLowerCase().includes(search);
+            const plateMatch = getSensitiveText(record.plate_number).toLowerCase().includes(search);
+            const normalizedRole = (record.role || '').toLowerCase();
+            const isNonStudent = normalizedRole === 'guest' || normalizedRole === 'non-student';
+            const roleValue = isNonStudent ? 'non-student' : 'student';
+            const roleMatch = applicationRoleFilter === 'all' ? true : roleValue === applicationRoleFilter;
+            const statusMatch = applicationStatusFilter === 'all'
+                ? true
+                : (record.status || '').toLowerCase() === applicationStatusFilter.toLowerCase();
+            return plateMatch && roleMatch && statusMatch;
         })
         .slice()
         .reverse();
-    const applicationsTotalPages = Math.max(1, Math.ceil(filteredApplicationRows.length / APPLICATIONS_PAGE_SIZE));
+    const displayedApplicationRows = applicationMiniTab === 'pending'
+        ? filteredApplicationRows.filter((record) => (record.status || '').toLowerCase() === 'pending')
+        : filteredApplicationRows.filter((record) => {
+            const normalizedStatus = (record.status || '').toLowerCase();
+            return normalizedStatus === 'approved' || normalizedStatus === 'rejected';
+        });
+    const applicationsTotalPages = Math.max(1, Math.ceil(displayedApplicationRows.length / APPLICATIONS_PAGE_SIZE));
     const safeApplicationsPage = Math.min(applicationsPage, applicationsTotalPages);
-    const paginatedApplicationRows = filteredApplicationRows.slice(
+    const paginatedApplicationRows = displayedApplicationRows.slice(
         (safeApplicationsPage - 1) * APPLICATIONS_PAGE_SIZE,
         (safeApplicationsPage - 1) * APPLICATIONS_PAGE_SIZE + APPLICATIONS_PAGE_SIZE
     );
@@ -937,8 +1066,6 @@ export default function AdminPanel() {
             .filter(Boolean)
     )];
 
-    const canViewVerifyDecrypted = isAdmin || hasValidVerifyKey;
-
     const PARKING_LIST_PAGE_SIZE = 20;
     const parkingListTotalPages = Math.max(1, Math.ceil(selectedAreaFilteredSlots.length / PARKING_LIST_PAGE_SIZE));
     const safeParkingListPage = Math.min(parkingListPage, parkingListTotalPages);
@@ -951,7 +1078,7 @@ export default function AdminPanel() {
 
     useEffect(() => {
         setApplicationsPage(1);
-    }, [search, activeVerify]);
+    }, [search, activeVerify, applicationMiniTab, applicationStatusFilter, applicationRoleFilter]);
 
     useEffect(() => {
         setReservationsPage(1);
@@ -985,9 +1112,44 @@ export default function AdminPanel() {
         }
     }, [logsPage, logsTotalPages]);
 
+    useEffect(() => {
+        if (!hasValidVerifyKey) return undefined;
+
+        let relockTimer = null;
+        const activityEvents = ['mousedown', 'keydown', 'mousemove', 'scroll', 'touchstart'];
+
+        const resetRelockTimer = () => {
+            if (relockTimer) {
+                clearTimeout(relockTimer);
+            }
+
+            // Auto-lock decrypted view after inactivity to reduce accidental sensitive data exposure.
+            relockTimer = setTimeout(() => {
+                setHasValidVerifyKey(false);
+                showInfo('No activity for 2 minutes. Decrypted view locked again.');
+            }, VERIFY_KEY_IDLE_TIMEOUT_MS);
+        };
+
+        activityEvents.forEach((eventName) => {
+            window.addEventListener(eventName, resetRelockTimer);
+        });
+
+        // Start idle countdown immediately after successful unlock.
+        resetRelockTimer();
+
+        return () => {
+            if (relockTimer) {
+                clearTimeout(relockTimer);
+            }
+            activityEvents.forEach((eventName) => {
+                window.removeEventListener(eventName, resetRelockTimer);
+            });
+        };
+    }, [hasValidVerifyKey, showInfo, VERIFY_KEY_IDLE_TIMEOUT_MS]);
+
     return (
-        <div className="center dashboard-bg">
-            <div className="card admin-large-card">
+        <div className="center dashboard-bg full-bleed-layout">
+            <div className="card admin-large-card full-bleed-card">
                 <div className="header-banner">
                     <img src={ualogo} alt="UA Logo" />
                     <div>
@@ -1046,7 +1208,7 @@ export default function AdminPanel() {
                                 className={`tab-button ${activeTab === 'applications' ? 'active' : ''}`}
                                 onClick={() => setActiveTab('applications')}
                             >
-                                Applications
+                                Applications ({pendingApplicationCount})
                             </button>
                         )}
                         {isAdmin && (
@@ -1088,44 +1250,43 @@ export default function AdminPanel() {
                         >
                             Verify Sticker
                         </button>
+                        {activeTab === 'parking' && (
+                            <div style={{ marginTop: '8px', border: '1px solid #cbd5e1', borderRadius: '12px', padding: '10px', background: '#f8fafc' }}>
+                                <h4 style={{ margin: '0 0 8px', color: '#0f172a', fontSize: '0.9rem' }}>Parking Map</h4>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    {parkingAreas.map((area) => {
+                                        const isActive = selectedParkingAreaName === area.name;
+                                        return (
+                                            <button
+                                                key={`sidebar-parking-area-${area.name}`}
+                                                type="button"
+                                                onClick={() => {
+                                                    setSelectedParkingAreaName(area.name);
+                                                    setSelectedParkingSlotId(null);
+                                                }}
+                                                style={{
+                                                    padding: '8px 10px',
+                                                    borderRadius: '8px',
+                                                    fontSize: '0.85rem',
+                                                    fontWeight: 700,
+                                                    textAlign: 'left',
+                                                    cursor: 'pointer',
+                                                    border: isActive ? '1px solid #bfdbfe' : '1px solid #d1d5db',
+                                                    background: isActive ? '#dbeafe' : '#f8fafc',
+                                                    color: isActive ? '#1d4ed8' : '#334155'
+                                                }}
+                                            >
+                                                {area.name}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     <div className="admin-main">
                         <div style={{ marginTop: '0' }}>
-                    {activeTab === 'parking' && (
-                        <div style={{ border: '1px solid #cbd5e1', borderRadius: '12px', padding: '10px', background: '#f8fafc' }}>
-                            <h4 style={{ margin: '0 0 8px', color: '#0f172a', fontSize: '0.9rem' }}>Parking Map</h4>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                {parkingAreas.map((area) => {
-                                    const isActive = selectedParkingAreaName === area.name;
-                                    return (
-                                        <button
-                                            key={`sidebar-area-${area.name}`}
-                                            type="button"
-                                            onClick={() => {
-                                                setSelectedParkingAreaName(area.name);
-                                                setSelectedParkingSlotId(null);
-                                            }}
-                                            style={{
-                                                padding: '8px 10px',
-                                                borderRadius: '8px',
-                                                fontSize: '0.85rem',
-                                                fontWeight: 700,
-                                                textAlign: 'left',
-                                                cursor: 'pointer',
-                                                border: isActive ? '1px solid #bfdbfe' : '1px solid #d1d5db',
-                                                background: isActive ? '#dbeafe' : '#f8fafc',
-                                                color: isActive ? '#1d4ed8' : '#334155'
-                                            }}
-                                        >
-                                            {area.name}
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    )}
-
                     {activeTab === 'applications' && isAdmin && (
                         <>
 
@@ -1139,16 +1300,79 @@ export default function AdminPanel() {
 
                         {/* TABLE PANEL */}
                         <div className="panel">
-                            <div className="panel-header-with-filter">
-                                <h3 style={{ margin: 0 }}>Application Records</h3>
-                                <div className="filter-controls">
-                                    <span className="status-badge approved">Decrypted View</span>
-                                    <input type="text" className="table-filter" placeholder="Search Plate..." onChange={(e) => setSearch(e.target.value.toLowerCase())} onKeyDown={handleSearchKeyPress} />
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '10px' }}>
+                                <h3 style={{ margin: 0, width: '100%', textAlign: 'left', alignSelf: 'flex-start' }}>Application Records</h3>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'nowrap' }}>
+                                    <div style={{ display: 'inline-flex', gap: '8px', alignItems: 'center', flexWrap: 'nowrap', minWidth: 0 }}>
+                                        <button
+                                            type="button"
+                                            className={`tab-button ${applicationMiniTab === 'pending' ? 'active' : ''}`}
+                                            onClick={() => setApplicationMiniTab('pending')}
+                                            style={{ marginTop: 0, padding: '6px 10px', fontSize: '12px', whiteSpace: 'nowrap' }}
+                                        >
+                                            Pending Applications ({pendingApplicationCount})
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className={`tab-button ${applicationMiniTab === 'all' ? 'active' : ''}`}
+                                            onClick={() => setApplicationMiniTab('all')}
+                                            style={{ marginTop: 0, padding: '6px 10px', fontSize: '12px', whiteSpace: 'nowrap' }}
+                                        >
+                                            All Applications ({allApplicationCount})
+                                        </button>
+                                    </div>
+                                    <div className="filter-controls" style={{ justifyContent: 'flex-end', display: 'flex', flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                                        {!isRootAdmin && (
+                                            <>
+                                                <input
+                                                    type="password"
+                                                    className="table-filter"
+                                                    placeholder="Enter Secret Key"
+                                                    value={verifySecretKeyInput}
+                                                    onChange={(e) => setVerifySecretKeyInput(e.target.value)}
+                                                    style={{ maxWidth: '180px', flex: '0 0 180px' }}
+                                                />
+                                                <button
+                                                    type="button"
+                                                    className="btn-gray slim"
+                                                    onClick={handleVerifySecretKey}
+                                                    style={{ marginTop: 0 }}
+                                                >
+                                                    Unlock
+                                                </button>
+                                            </>
+                                        )}
+                                        <select
+                                            value={applicationStatusFilter}
+                                            onChange={(e) => setApplicationStatusFilter(e.target.value)}
+                                            style={{ maxWidth: '140px', height: '36px', fontSize: '12px', padding: '6px 10px', flex: '0 0 140px' }}
+                                        >
+                                            <option value="all">All Status</option>
+                                            <option value="pending">Pending</option>
+                                            <option value="approved">Approved</option>
+                                            <option value="rejected">Rejected</option>
+                                        </select>
+                                        <select
+                                            value={applicationRoleFilter}
+                                            onChange={(e) => setApplicationRoleFilter(e.target.value)}
+                                            style={{ maxWidth: '160px', height: '36px', fontSize: '12px', padding: '6px 10px', flex: '0 0 160px' }}
+                                        >
+                                            <option value="all">All Roles</option>
+                                            <option value="student">Student</option>
+                                            <option value="non-student">Non-Student</option>
+                                        </select>
+                                        <input type="text" className="table-filter" placeholder="Search Plate..." onChange={(e) => setSearch(e.target.value.toLowerCase())} onKeyDown={handleSearchKeyPress} style={{ flex: '0 0 180px' }} />
+                                    </div>
                                 </div>
                             </div>
 
+                            {displayedApplicationRows.length === 0 ? (
+                                <p style={{ color: '#64748b' }}>
+                                    {applicationMiniTab === 'pending' ? 'No pending applications found' : 'No applications found'}
+                                </p>
+                            ) : (
                             <div className="table-wrap">
-                                <table className="data-table">
+                                <table className="data-table" style={{ tableLayout: 'fixed', fontSize: '12px' }}>
                                     <thead>
                                         <tr>
                                             <th>Owner Name</th>
@@ -1156,21 +1380,22 @@ export default function AdminPanel() {
                                             <th>Plate Number</th>
                                             <th>Sticker ID</th>
                                             <th>Type</th>
-                                            <th>Fee</th>
-                                            <th>Payment Method</th>
-                                            <th>Reference No.</th>
+                                            <th>Payment</th>
                                             <th>Expires</th>
                                             <th>Status</th>
-                                            <th style={{ textAlign: 'right' }}>Actions</th>
+                                            <th style={{ width: '220px' }}>
+                                                Notes
+                                            </th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {paginatedApplicationRows.map((v) => (
+                                        {paginatedApplicationRows.map((v) => {
+                                            return (
                                             <tr key={v.id}>
-                                                <td style={{ fontWeight: 600 }}>{decryptData(v.owner_name)}</td>
+                                                <td style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={getSensitiveText(v.owner_name)}>{getSensitiveText(v.owner_name)}</td>
                                         
                                         {/* ROLE INFO COLUMN */}
-                                        <td>
+                                        <td style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={v.identifier || 'N/A'}>
                                             <div style={{ lineHeight: '1.2' }}>
                                                 {(() => {
                                                     const normalizedRole = (v.role || '').toLowerCase();
@@ -1193,12 +1418,12 @@ export default function AdminPanel() {
                                             </div>
                                         </td>
 
-                                        <td className="bold-plate">{decryptData(v.plate_number)}</td>
-                                        <td className="sticker-id-text">{v.sticker_id || '---'}</td>
-                                        <td>{v.vehicle_type}</td>
-                                        <td>₱{getFee(v.vehicle_type).toLocaleString()}</td>
-                                        <td>{v.payment_method || '---'}</td>
-                                        <td style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{v.payment_reference || '---'}</td>
+                                        <td className="bold-plate" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={getSensitiveText(v.plate_number)}>{getSensitiveText(v.plate_number)}</td>
+                                        <td className="sticker-id-text" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={v.sticker_id || '---'}>{v.sticker_id || '---'}</td>
+                                        <td style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={v.vehicle_type}>{v.vehicle_type}</td>
+                                        <td style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={`₱${getFee(v.vehicle_type).toLocaleString()} | ${v.payment_method || '---'} | ${v.payment_reference || '---'}`}>
+                                            ₱{getFee(v.vehicle_type).toLocaleString()} | {v.payment_method || '---'}
+                                        </td>
                                         <td>
                                             {v.expiration_date ? (
                                                 <span style={{ 
@@ -1214,19 +1439,34 @@ export default function AdminPanel() {
                                                 {v.status}
                                             </span>
                                         </td>
-                                        <td style={{ textAlign: 'right' }}>
-                                            {v.status === 'Pending' ? (
-                                                <div style={{ display: 'flex', gap: '5px', justifyContent: 'flex-end' }}>
-                                                    <button className="btn-green slim" onClick={() => handleUpdateStatus(v.id, 'Approved')}>✔</button>
-                                                    <button className="btn-red slim" onClick={() => handleUpdateStatus(v.id, 'Rejected')}>✖</button>
-                                                </div>
-                                            ) : <button className="btn-gray slim" onClick={() => handleUpdateStatus(v.id, 'Pending')}>Reset</button>}
+                                        <td style={{ width: '220px', textAlign: 'left', verticalAlign: 'middle', paddingLeft: '12px' }}>
+                                            <span
+                                                onClick={() => openApplicationModal(v)}
+                                                title={(v.admin_notes || '').trim() || 'Add a note...'}
+                                                style={{
+                                                    fontSize: '12px',
+                                                    fontWeight: 600,
+                                                    color: '#000000',
+                                                    cursor: 'pointer',
+                                                    display: 'inline-block',
+                                                    textAlign: 'left',
+                                                    maxWidth: '100%',
+                                                    lineHeight: 1.1,
+                                                    whiteSpace: 'nowrap',
+                                                    overflow: 'hidden',
+                                                    textOverflow: 'ellipsis'
+                                                }}
+                                            >
+                                                {(v.admin_notes || '').trim() || 'Add a note...'}
+                                            </span>
                                         </td>
                                     </tr>
-                                ))}
+                                );
+                            })}
                             </tbody>
                         </table>
                     </div>
+                    )}
                     <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
                         <button
                             className="btn-gray slim"
@@ -1248,6 +1488,169 @@ export default function AdminPanel() {
                             Next
                         </button>
                     </div>
+                    {/* Admin review modal for a single sticker application. */}
+                    {applicationModalOpen && applicationModalRecord && (
+                        <div style={{
+                            position: 'fixed',
+                            inset: 0,
+                            zIndex: 1100,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            background: 'rgba(15, 23, 42, 0.55)',
+                            padding: '16px'
+                        }} onClick={closeApplicationModal}>
+                            <div style={{
+                                width: '100%',
+                                maxWidth: '760px',
+                                background: '#ffffff',
+                                borderRadius: '16px',
+                                boxShadow: '0 24px 60px rgba(15, 23, 42, 0.25)',
+                                border: '1px solid #e2e8f0',
+                                padding: '28px',
+                                position: 'relative',
+                                maxHeight: '90vh',
+                                overflowY: 'auto'
+                            }} className="reservation-modal-scroll" onClick={(event) => event.stopPropagation()}>
+                                <button
+                                    type="button"
+                                    onClick={closeApplicationModal}
+                                    style={{
+                                        position: 'absolute',
+                                        top: '18px',
+                                        right: '18px',
+                                        width: '36px',
+                                        height: '36px',
+                                        border: 'none',
+                                        borderRadius: '999px',
+                                        background: '#f8fafc',
+                                        display: 'grid',
+                                        placeItems: 'center',
+                                        fontSize: '18px',
+                                        lineHeight: 1,
+                                        cursor: 'pointer',
+                                        color: '#475569',
+                                        boxShadow: '0 6px 14px rgba(15, 23, 42, 0.12)'
+                                    }}
+                                    aria-label="Close application modal"
+                                >
+                                    ✕
+                                </button>
+                                <h3 style={{ margin: '0 0 16px', color: '#0f172a', textAlign: 'center' }}>Application Notes</h3>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>Owner Name</label>
+                                        <input type="text" value={getSensitiveText(applicationModalRecord.owner_name)} disabled style={{ background: '#f8fafc', color: '#334155' }} />
+                                    </div>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>Status</label>
+                                        <input type="text" value={(applicationModalRecord.status || 'Pending').toUpperCase()} disabled style={{ background: '#f8fafc', color: '#334155' }} />
+                                    </div>
+                                </div>
+
+                                {(() => {
+                                    // Parse identifier shape so modal fields stay readable for both student and non-student users.
+                                    const applicationRoleValue = (applicationModalRecord.role || '---').toString();
+                                    const normalizedApplicationRole = applicationRoleValue.toLowerCase();
+                                    const isStudentApplication = normalizedApplicationRole === 'student';
+                                    const applicationIdentifierText = (applicationModalRecord.identifier || '').trim();
+                                    const identifierParts = applicationIdentifierText.split('|').map((part) => part.trim()).filter(Boolean);
+                                    const studentIdValue = isStudentApplication ? (identifierParts[0] || '---') : '---';
+                                    const schoolTrackValue = isStudentApplication ? (identifierParts[1] || '---') : '---';
+
+                                    return (
+                                        <>
+                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+                                                <div>
+                                                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>User Type</label>
+                                                    <input
+                                                        type="text"
+                                                        value={isStudentApplication ? 'Student' : 'Non-Student'}
+                                                        disabled
+                                                        style={{ background: '#f8fafc', color: '#334155' }}
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>Identifier</label>
+                                                    <input
+                                                        type="text"
+                                                        value={applicationIdentifierText || '---'}
+                                                        disabled
+                                                        style={{ background: '#f8fafc', color: '#334155' }}
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            {isStudentApplication ? (
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+                                                    <div>
+                                                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>Student ID</label>
+                                                        <input type="text" value={studentIdValue} disabled style={{ background: '#f8fafc', color: '#334155' }} />
+                                                    </div>
+                                                    <div>
+                                                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>College / SHS Strand or Course</label>
+                                                        <input type="text" value={schoolTrackValue} disabled style={{ background: '#f8fafc', color: '#334155' }} />
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div style={{ marginBottom: '12px' }}>
+                                                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>Non-Student Purpose</label>
+                                                    <input type="text" value={applicationIdentifierText || '---'} disabled style={{ background: '#f8fafc', color: '#334155' }} />
+                                                </div>
+                                            )}
+                                        </>
+                                    );
+                                })()}
+
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>Plate Number</label>
+                                        <input type="text" value={getSensitiveText(applicationModalRecord.plate_number)} disabled style={{ background: '#f8fafc', color: '#334155' }} />
+                                    </div>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>Sticker ID</label>
+                                        <input type="text" value={applicationModalRecord.sticker_id || '---'} disabled style={{ background: '#f8fafc', color: '#334155' }} />
+                                    </div>
+                                </div>
+                                <div style={{ marginBottom: '12px' }}>
+                                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>Notes</label>
+                                    <textarea
+                                        value={applicationModalNotes}
+                                        onChange={(e) => setApplicationModalNotes(e.target.value)}
+                                        rows={4}
+                                        placeholder="Add a note here, especially when rejecting an application"
+                                        style={{
+                                            width: '100%',
+                                            maxWidth: '100%',
+                                            boxSizing: 'border-box',
+                                            resize: 'vertical',
+                                            overflowY: 'auto'
+                                        }}
+                                    />
+                                </div>
+                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                    <button
+                                        type="button"
+                                        className="btn-red"
+                                        onClick={() => handleApplicationModalDecision('Rejected')}
+                                        disabled={isSavingApplicationEdit}
+                                        style={{ flex: 1, marginTop: 0, opacity: isSavingApplicationEdit ? 0.7 : 1 }}
+                                    >
+                                        Reject
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="btn-green"
+                                        onClick={() => handleApplicationModalDecision('Approved')}
+                                        disabled={isSavingApplicationEdit}
+                                        style={{ flex: 1, marginTop: 0, opacity: isSavingApplicationEdit ? 0.7 : 1 }}
+                                    >
+                                        Approve
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 </>)}
@@ -1284,7 +1687,7 @@ export default function AdminPanel() {
                                 </button>
                             )}
                         </div>
-                        {!isAdmin && (
+                        {!isRootAdmin && (
                             <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', alignItems: 'center', marginTop: '10px', flexWrap: 'wrap' }}>
                                 <input
                                     type="password"
@@ -1387,116 +1790,80 @@ export default function AdminPanel() {
                                         <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>Sticker ID</th>
                                         <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>Spots</th>
                                         <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>Reason</th>
-                                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>Reserved For</th>
-                                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>Status</th>
-                                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>Requested</th>
-                                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e2e8f0', minWidth: '220px' }}>Notes</th>
+                                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>Reservation Date</th>
+                                        {reservationMiniTab === 'all' && (
+                                            <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>Status</th>
+                                        )}
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {paginatedReservationRows.map((res) => {
-                                        const isEditing = editingReservationId === res.id;
+                                        const reasonText = (res.reservation_reason || '').trim() || 'No reason provided';
+                                        const statusText = (res.status || 'pending').toLowerCase();
+                                        const statusColor = statusText === 'approved'
+                                            ? '#10b981'
+                                            : statusText === 'denied'
+                                                ? '#ef4444'
+                                                : '#64748b';
+                                        const statusBg = statusText === 'approved'
+                                            ? '#d1fae5'
+                                            : statusText === 'denied'
+                                                ? '#fee2e2'
+                                                : '#f1f5f9';
                                         return (
                                         <tr key={res.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                                            <td style={{ padding: '10px' }}>{res.applicant_username}</td>
-                                            <td style={{ padding: '10px', fontWeight: 600 }}>{res.sticker_id || 'N/A'}</td>
-                                            <td style={{ padding: '10px' }}>
-                                                {Array.isArray(res.reserved_spots) 
-                                                    ? res.reserved_spots.join(', ')
-                                                    : JSON.parse(res.reserved_spots || '[]').join(', ')}
+                                            <td style={{ padding: '10px', maxWidth: '140px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'left' }}>{res.applicant_username}</td>
+                                            <td style={{ padding: '10px', fontWeight: 600, maxWidth: '120px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'left' }}>{res.sticker_id || 'N/A'}</td>
+                                            <td style={{ padding: '10px', maxWidth: '160px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'left' }}>
+                                                {parseReservationSpots(res).join(', ') || '---'}
                                             </td>
-                                            <td style={{ padding: '10px', fontSize: '12px' }}>
+                                            <td style={{ padding: '10px', fontSize: '12px', maxWidth: '420px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'left' }}>
                                                 <button
                                                     type="button"
-                                                    className="btn-blue slim"
                                                     onClick={() => {
-                                                        setReasonModalText((res.reservation_reason || '').trim() || 'No reason provided');
+                                                        beginReservationEdit(res);
+                                                        setReasonModalReservation(res);
                                                         setReasonModalOpen(true);
                                                     }}
-                                                    style={{ marginTop: 0, padding: '8px 12px', fontSize: '11px', whiteSpace: 'nowrap' }}
+                                                    style={{
+                                                        margin: 0,
+                                                        padding: 0,
+                                                        width: '100%',
+                                                        border: 'none',
+                                                        background: 'transparent',
+                                                        color: '#334155',
+                                                        textAlign: 'left',
+                                                        fontSize: '12px',
+                                                        whiteSpace: 'nowrap',
+                                                        overflow: 'hidden',
+                                                        textOverflow: 'ellipsis',
+                                                        cursor: 'pointer'
+                                                    }}
+                                                    title={reasonText}
                                                 >
-                                                    View Reason
+                                                    {reasonText}
                                                 </button>
                                             </td>
-                                            <td style={{ padding: '10px', fontSize: '12px' }}>
+                                            <td style={{ padding: '10px', fontSize: '12px', maxWidth: '180px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'left' }}>
                                                 {new Date(res.reserved_for_datetime).toLocaleString()}
                                             </td>
-                                            <td style={{ padding: '10px' }}>
-                                                {isEditing ? (
-                                                    <select
-                                                        value={editReservationStatus}
-                                                        onChange={(e) => setEditReservationStatus((e.target.value || '').toLowerCase())}
-                                                        style={{ padding: '4px 6px', fontSize: '11px', minWidth: '120px' }}
-                                                    >
-                                                        <option value="pending">pending</option>
-                                                        <option value="approved">approved</option>
-                                                        <option value="denied">denied</option>
-                                                        <option value="cancelled">cancelled</option>
-                                                    </select>
-                                                ) : (
+                                            {reservationMiniTab === 'all' && (
+                                                <td style={{ padding: '10px', textAlign: 'left' }}>
                                                     <span style={{
                                                         display: 'inline-block',
                                                         padding: '4px 8px',
                                                         borderRadius: '999px',
+                                                        background: statusBg,
+                                                        color: statusColor,
                                                         fontSize: '11px',
                                                         fontWeight: 700,
-                                                        background: (res.status || '').toLowerCase() === 'approved' ? '#dcfce7' : (res.status || '').toLowerCase() === 'denied' ? '#fee2e2' : '#fef3c7',
-                                                        color: (res.status || '').toLowerCase() === 'approved' ? '#166534' : (res.status || '').toLowerCase() === 'denied' ? '#b91c1c' : '#92400e',
-                                                        textTransform: 'uppercase'
+                                                        textTransform: 'uppercase',
+                                                        letterSpacing: '0.04em'
                                                     }}>
-                                                        {res.status || 'pending'}
+                                                        {statusText}
                                                     </span>
-                                                )}
-                                            </td>
-                                            <td style={{ padding: '10px', fontSize: '12px' }}>
-                                                {new Date(res.created_at).toLocaleString()}
-                                            </td>
-                                            <td style={{ padding: '10px', fontSize: '12px', minWidth: '220px' }}>
-                                                {isEditing ? (
-                                                    <>
-                                                        <input
-                                                            type="text"
-                                                            placeholder="Admin notes..."
-                                                            value={editReservationNotes}
-                                                            onChange={(e) => setEditReservationNotes(e.target.value)}
-                                                            style={{ width: '100%', padding: '4px', fontSize: '11px', marginBottom: '6px' }}
-                                                        />
-                                                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px' }}>
-                                                            <button
-                                                                type="button"
-                                                                className="btn-green slim"
-                                                                onClick={() => saveReservationEdit(res)}
-                                                                disabled={isSavingReservationEdit}
-                                                                style={{ marginTop: 0, padding: '4px 8px', fontSize: '11px', opacity: isSavingReservationEdit ? 0.7 : 1 }}
-                                                            >
-                                                                Save
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                className="btn-gray slim"
-                                                                onClick={cancelReservationEdit}
-                                                                disabled={isSavingReservationEdit}
-                                                                style={{ marginTop: 0, padding: '4px 8px', fontSize: '11px' }}
-                                                            >
-                                                                Cancel
-                                                            </button>
-                                                        </div>
-                                                    </>
-                                                ) : (
-                                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                                                        <span style={{ color: '#475569' }}>{(res.admin_notes || '').trim() || 'No notes added'}</span>
-                                                        <button
-                                                            type="button"
-                                                            className="btn-gray slim"
-                                                            onClick={() => beginReservationEdit(res)}
-                                                            title="Edit status and notes"
-                                                            style={{ marginTop: 0, padding: '2px 7px', fontSize: '12px', lineHeight: 1 }}
-                                                        >
-                                                            ✏
-                                                        </button>
-                                                    </div>
-                                                )}
-                                            </td>
+                                                </td>
+                                            )}
                                         </tr>
                                         );
                                     })}
@@ -1504,7 +1871,8 @@ export default function AdminPanel() {
                             </table>
                         </div>
                     )}
-                    {reasonModalOpen && (
+                    {/* Reservation details modal for approve/deny decisions and post-review updates. */}
+                    {reasonModalOpen && reasonModalReservation && (
                         <div style={{
                             position: 'fixed',
                             inset: 0,
@@ -1512,21 +1880,49 @@ export default function AdminPanel() {
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            background: 'rgba(15, 23, 42, 0.35)',
-                            padding: '20px'
+                            background: 'rgba(15, 23, 42, 0.55)',
+                            padding: '16px'
+                        }} onClick={() => {
+                            setReasonModalOpen(false);
+                            setReasonModalReservation(null);
+                            cancelReservationEdit();
                         }}>
                             <div style={{
                                 width: '100%',
-                                maxWidth: '680px',
+                                maxWidth: '940px',
                                 background: '#ffffff',
-                                borderRadius: '24px',
-                                padding: '28px 28px 24px',
-                                boxShadow: '0 24px 60px rgba(15, 23, 42, 0.18)',
-                                position: 'relative'
-                            }}>
+                                borderRadius: '16px',
+                                boxShadow: '0 24px 60px rgba(15, 23, 42, 0.25)',
+                                border: '1px solid #e2e8f0',
+                                padding: '28px',
+                                position: 'relative',
+                                maxHeight: '90vh',
+                                overflowY: 'auto'
+                            }} className="reservation-modal-scroll" onClick={(event) => event.stopPropagation()}>
+                                {(() => {
+                                    // Decode structured reason text (Category | Plate | Event...) into labeled display fields.
+                                    const reasonDetails = parseReservationReasonDetails(reasonModalReservation.reservation_reason);
+                                    const getFieldValue = (...labels) => {
+                                        const normalizedLookup = labels.map((label) => label.toLowerCase());
+                                        const match = reasonDetails.fields.find((field) => normalizedLookup.includes(field.label.toLowerCase()));
+                                        return match ? match.value : '---';
+                                    };
+                                    const currentModalStatus = (reasonModalReservation.status || 'pending').toLowerCase();
+                                    const isReviewedStatus = currentModalStatus === 'approved' || currentModalStatus === 'denied';
+                                    const userValue = reasonModalReservation.applicant_username || '---';
+                                    const stickerValue = reasonModalReservation.sticker_id || 'N/A';
+                                    const spotsValue = parseReservationSpots(reasonModalReservation).join(', ') || '---';
+                                    const reservedForValue = reasonModalReservation.reserved_for_datetime ? new Date(reasonModalReservation.reserved_for_datetime).toLocaleString() : '---';
+
+                                    return (
+                                        <>
                                 <button
                                     type="button"
-                                    onClick={() => setReasonModalOpen(false)}
+                                    onClick={() => {
+                                        setReasonModalOpen(false);
+                                        setReasonModalReservation(null);
+                                        cancelReservationEdit();
+                                    }}
                                     style={{
                                         position: 'absolute',
                                         top: '18px',
@@ -1548,12 +1944,207 @@ export default function AdminPanel() {
                                 >
                                     ✕
                                 </button>
-                                <h3 style={{ margin: 0, marginBottom: '12px', color: '#0f172a' }}>Reservation Reason</h3>
-                                <div style={{ maxHeight: '60vh', overflowY: 'auto', paddingRight: '4px' }}>
-                                    <p style={{ margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.75, color: '#334155', fontSize: '0.96rem' }}>
-                                        {reasonModalText}
-                                    </p>
+                                <h3 style={{ margin: '0 0 12px', color: '#0f172a', textAlign: 'center' }}>Reservation Details</h3>
+                                <div style={{ marginBottom: '12px' }}>
+                                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                                        User
+                                    </label>
+                                    <input type="text" value={userValue} disabled style={{ background: '#f8fafc', color: '#334155' }} />
                                 </div>
+
+                                <div style={{ marginBottom: '12px' }}>
+                                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                                        Sticker ID
+                                    </label>
+                                    <input type="text" value={stickerValue} disabled style={{ background: '#f8fafc', color: '#334155' }} />
+                                </div>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                                            Spot/s
+                                        </label>
+                                        <input type="text" value={spotsValue} disabled style={{ background: '#f8fafc', color: '#334155' }} />
+                                    </div>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                                            Reservation Date
+                                        </label>
+                                        <input type="text" value={reservedForValue} disabled style={{ background: '#f8fafc', color: '#334155' }} />
+                                    </div>
+                                </div>
+
+                                {reasonDetails.fields.length > 0 ? (
+                                    <>
+                                        <div style={{ marginBottom: '12px' }}>
+                                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                                                Reason Category
+                                            </label>
+                                            <input type="text" value={getFieldValue('Category', 'Reason Category')} disabled style={{ background: '#f8fafc', color: '#334155' }} />
+                                        </div>
+
+                                        <div style={{ marginBottom: '12px' }}>
+                                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                                                Plate Number
+                                            </label>
+                                            <input type="text" value={getFieldValue('Plate Number')} disabled style={{ background: '#f8fafc', color: '#334155' }} />
+                                        </div>
+
+                                        <div style={{ marginBottom: '12px' }}>
+                                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                                                Org Name
+                                            </label>
+                                            <input type="text" value={getFieldValue('Org Name', 'Organization Name')} disabled style={{ background: '#f8fafc', color: '#334155' }} />
+                                        </div>
+
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                                                    Event Name
+                                                </label>
+                                                <input type="text" value={getFieldValue('Event Name')} disabled style={{ background: '#f8fafc', color: '#334155' }} />
+                                            </div>
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                                                    Activity Form
+                                                </label>
+                                                <input type="text" value={getFieldValue('Activity Form', 'Activity Form No.')} disabled style={{ background: '#f8fafc', color: '#334155' }} />
+                                            </div>
+                                        </div>
+
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                                                    Name of Person Requesting Reservation
+                                                </label>
+                                                <input type="text" value={getFieldValue('Name of Person Requesting Reservation', 'Requester', 'Requester Name')} disabled style={{ background: '#f8fafc', color: '#334155' }} />
+                                            </div>
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                                                    Org Position
+                                                </label>
+                                                <input type="text" value={getFieldValue('Org Position', 'Position')} disabled style={{ background: '#f8fafc', color: '#334155' }} />
+                                            </div>
+                                        </div>
+
+                                        <div style={{ marginBottom: '12px' }}>
+                                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                                                Detailed Reason
+                                            </label>
+                                            <textarea
+                                                value={reasonDetails.extraText || getFieldValue('Detailed Reason', 'Details') || (reasonModalReservation.reservation_reason || '').trim() || 'No reason provided'}
+                                                disabled
+                                                rows={4}
+                                                style={{
+                                                    width: '100%',
+                                                    maxWidth: '100%',
+                                                    boxSizing: 'border-box',
+                                                    resize: 'vertical',
+                                                    overflowY: 'auto',
+                                                    background: '#f8fafc',
+                                                    color: '#334155'
+                                                }}
+                                            />
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div style={{ marginBottom: '12px' }}>
+                                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                                            Reason
+                                        </label>
+                                        <textarea
+                                            value={(reasonModalReservation.reservation_reason || '').trim() || 'No reason provided'}
+                                            disabled
+                                            rows={4}
+                                            style={{
+                                                width: '100%',
+                                                maxWidth: '100%',
+                                                boxSizing: 'border-box',
+                                                resize: 'vertical',
+                                                overflowY: 'auto',
+                                                background: '#f8fafc',
+                                                color: '#334155'
+                                            }}
+                                        />
+                                    </div>
+                                )}
+
+                                <div style={{ marginBottom: '14px' }}>
+                                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                                        Status
+                                    </label>
+                                    {isReviewedStatus ? (
+                                        <select
+                                            value={editReservationStatus}
+                                            onChange={(e) => setEditReservationStatus((e.target.value || '').toLowerCase())}
+                                        >
+                                            <option value="approved">Approved</option>
+                                            <option value="denied">Denied</option>
+                                        </select>
+                                    ) : (
+                                        <input type="text" value={(reasonModalReservation.status || 'pending').toUpperCase()} disabled style={{ background: '#f8fafc', color: '#334155' }} />
+                                    )}
+                                </div>
+
+                                {/* Pending reservations expose quick approve/deny actions; reviewed rows use Save Changes below. */}
+                                {!isReviewedStatus && (
+                                    <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
+                                        <button
+                                            type="button"
+                                            className="btn-red"
+                                            onClick={() => handleReasonModalDecision('denied')}
+                                            disabled={isSavingReservationEdit}
+                                            style={{ flex: 1, marginTop: 0, opacity: isSavingReservationEdit ? 0.7 : 1 }}
+                                        >
+                                            Deny
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="btn-green"
+                                            onClick={() => handleReasonModalDecision('approved')}
+                                            disabled={isSavingReservationEdit}
+                                            style={{ flex: 1, marginTop: 0, opacity: isSavingReservationEdit ? 0.7 : 1 }}
+                                        >
+                                            Approve
+                                        </button>
+                                    </div>
+                                )}
+
+                                <div style={{ marginBottom: '14px' }}>
+                                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                                        Admin Notes
+                                    </label>
+                                    <textarea
+                                        value={editReservationNotes}
+                                        onChange={(e) => setEditReservationNotes(e.target.value)}
+                                        placeholder="Add note before approving/denying..."
+                                        rows={3}
+                                        style={{
+                                            width: '100%',
+                                            maxWidth: '100%',
+                                            boxSizing: 'border-box',
+                                            resize: 'vertical',
+                                            overflowY: 'auto'
+                                        }}
+                                    />
+                                </div>
+
+                                {isReviewedStatus && (
+                                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                        <button
+                                            type="button"
+                                            className="btn-blue slim"
+                                            onClick={() => handleReasonModalDecision(editReservationStatus)}
+                                            disabled={isSavingReservationEdit}
+                                            style={{ marginTop: 0, minWidth: '160px', opacity: isSavingReservationEdit ? 0.7 : 1 }}
+                                        >
+                                            Save Changes
+                                        </button>
+                                    </div>
+                                )}
+                                        </>
+                                    );
+                                })()}
                             </div>
                         </div>
                     )}
@@ -1764,8 +2355,7 @@ export default function AdminPanel() {
                                         <th>Timestamp</th>
                                         <th>Event</th>
                                         <th>Slot</th>
-                                        <th>Plate</th>
-                                        <th>Sticker</th>
+                                        <th>Sticker/Plate Number</th>
                                         <th>Actor</th>
                                         <th>Notes</th>
                                     </tr>
@@ -1774,10 +2364,9 @@ export default function AdminPanel() {
                                     {paginatedParkingLogs.map(log => (
                                         <tr key={log.id}>
                                             <td>{new Date(log.timestamp).toLocaleString()}</td>
-                                            <td>{log.eventType}</td>
+                                            <td>{getParkingLogLabel(log.eventType)}</td>
                                             <td>{log.slotId}</td>
-                                            <td>{log.plateNumber || '-'}</td>
-                                            <td>{log.stickerId || '-'}</td>
+                                            <td>{log.stickerId || log.plateNumber || '-'}</td>
                                             <td>{log.actor || '-'}</td>
                                             <td>{log.notes || '-'}</td>
                                         </tr>

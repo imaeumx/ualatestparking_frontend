@@ -52,7 +52,7 @@ export default function UserDashboard() {
     // ============ STICKER APPLICATION FORM STATE ============
     // Used by StickerManagement component
     const [plate, setPlate] = useState(''); // Plate input (managed here but mainly used in child)
-    const [type, setType] = useState('4-Wheels'); // Vehicle type dropdown
+    const [type] = useState('4-Wheels'); // Vehicle type defaults to 4-Wheels in current flow
     const [showNotif, setShowNotif] = useState(false); // Toggle notification panel visibility
     const [showSettings, setShowSettings] = useState(false); // Toggle settings/profile panel visibility
     const [showPaymentModal, setShowPaymentModal] = useState(false); // Toggle payment modal visibility
@@ -71,27 +71,10 @@ export default function UserDashboard() {
     // Shared with ParkingManagement component
     const [activeTab, setActiveTab] = useState('dashboard'); // Which tab is visible
     const [parkingSlots, setParkingSlots] = useState([]); // Array of all parking slots (180 total) with their status/occupant info
-    const [stickers, setStickers] = useState([]); // [DEPRECATED: unused] - was for sticker list
-    const [selectedParkingSlotId, setSelectedParkingSlotId] = useState(null); // Currently clicked slot ID
-    const [selectedParkingAreaName, setSelectedParkingAreaName] = useState('Old Parking Space'); // Active parking lot
-    const [showParkForSelectedSpot, setShowParkForSelectedSpot] = useState(false); // Toggle \"Park Vehicle\" form
-    const [parkStickerInput, setParkStickerInput] = useState(''); // Parking form: sticker ID input
-    const [parkPlateInput, setParkPlateInput] = useState(''); // Parking form: plate number input
-    
-    // Leave/check-out confirmation modal state
-    const [showLeaveConfirmModal, setShowLeaveConfirmModal] = useState(false);
-    const [leaveConfirmSlotId, setLeaveConfirmSlotId] = useState(null);
     
     const [userReservations, setUserReservations] = useState([]);
-    const [applicationRecordsPage, setApplicationRecordsPage] = useState(1);
-    const [userReservationsPage, setUserReservationsPage] = useState(1);
     const [reservationStatusNotifs, setReservationStatusNotifs] = useState([]);
     const [readReservationNotifKeys, setReadReservationNotifKeys] = useState([]);
-
-    // Parking form state
-    const [stickerInput, setStickerInput] = useState('');
-    const [slotInput, setSlotInput] = useState('');
-    const [leaveIdentifier, setLeaveIdentifier] = useState('');
 
     const paymentMethods = ['Pay On-Site', 'GCash', 'BPI', 'BDO', 'PNB', 'USSC', 'Palawan Express', 'RCBC', 'Cebuana Lhuillier'];
 
@@ -188,6 +171,7 @@ export default function UserDashboard() {
             fetchUserRecords(savedUser.username);
             fetchUserReservations(savedUser.username);
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [navigate]);
 
     useEffect(() => {
@@ -200,6 +184,7 @@ export default function UserDashboard() {
     useEffect(() => {
         if (!user?.username) return;
         fetchUserReservations(user.username);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [timeTick, user?.username]);
 
     useEffect(() => {
@@ -272,16 +257,8 @@ export default function UserDashboard() {
         setReservationStatusNotifs(storedNotifs);
     }, [user?.username, userReservations, showInfo]);
 
-    useEffect(() => {
-        setApplicationRecordsPage(1);
-    }, [records.length]);
-
-    useEffect(() => {
-        setUserReservationsPage(1);
-    }, [userReservations.length]);
-
     /**
-     * Load parking slots and valid stickers from localStorage.
+     * Load parking slots from localStorage.
      */
     useEffect(() => {
         const savedSlots = localStorage.getItem('parkingSlots');
@@ -321,12 +298,6 @@ export default function UserDashboard() {
             setParkingSlots(initialSlots);
             localStorage.setItem('parkingSlots', JSON.stringify(initialSlots));
         }
-        const savedStickers = localStorage.getItem('validParkingStickers');
-        if (savedStickers) {
-            setStickers(JSON.parse(savedStickers));
-        } else {
-            setStickers([]);
-        }
     }, [TOTAL_PARKING_SLOTS]);
 
     /**
@@ -362,92 +333,6 @@ export default function UserDashboard() {
             setUserReservations(res.data);
         } catch (err) {
             console.error("Reservations fetch error:", err);
-        }
-    };
-
-    /**
-     * Park a vehicle in a specific slot after validating sticker ID.
-     * Updates parking state and localStorage.
-     */
-    const parkVehicle = (slotId, plateNumber, stickerId) => {
-        const normalizedStickerId = (stickerId || '').trim().toUpperCase();
-        const currentStickers = getValidUserStickers();
-        if (!currentStickers.includes(normalizedStickerId)) {
-            showError(`Invalid sticker ID. Valid approved stickers: ${currentStickers.join(', ') || 'None available - please contact admin'}`);
-            return false;
-        }
-
-        const alreadyParkedSlot = parkingSlots.find(slot =>
-            slot.status === 'occupied' &&
-            (slot.stickerId || '').trim().toUpperCase() === normalizedStickerId
-        );
-        if (alreadyParkedSlot) {
-            showError(`Sticker ${normalizedStickerId} is already parked in slot ${alreadyParkedSlot.id}.`);
-            return false;
-        }
-
-        const targetSlot = parkingSlots.find(slot => slot.id === slotId);
-        const reservationInfo = getReservationInfo(targetSlot);
-        const reservedStickerId = (targetSlot?.reservedStickerId || '').trim().toUpperCase();
-        if (reservationInfo && (reservationInfo.isActive || reservationInfo.isOverdue) && reservedStickerId && reservedStickerId !== normalizedStickerId) {
-            showError('This spot is reserved right now. Please choose another spot.');
-            return false;
-        }
-
-        const updatedSlots = parkingSlots.map(slot =>
-            slot.id === slotId
-                ? {
-                    ...slot,
-                    status: 'occupied',
-                    plateNumber,
-                    stickerId: normalizedStickerId,
-                    entryTime: new Date().toISOString(),
-                    reservedFor: null,
-                    reservedStickerId: ''
-                }
-                : slot
-        );
-        setParkingSlots(updatedSlots);
-        localStorage.setItem('parkingSlots', JSON.stringify(updatedSlots));
-        showSuccess(`Vehicle ${plateNumber} parked in slot ${slotId}`);
-        return true;
-    };
-
-    /**
-     * Handle parking vehicle with proper form validation.
-     */
-    const handleParkVehicle = () => {
-        if (!stickerInput.trim()) {
-            showError('Please enter a sticker ID');
-            return;
-        }
-        if (!slotInput.trim()) {
-            showError('Please enter a slot number');
-            return;
-        }
-
-        const sticker = stickerInput.trim().toUpperCase();
-        const slot = parseInt(slotInput.trim());
-
-        const plateNumber = getPlateFromSticker(sticker);
-        if (!plateNumber) {
-            showError('Invalid sticker ID or not valid for the current semester.');
-            return;
-        }
-
-        const availableSlots = parkingSlots.filter(s => s.status === 'available');
-        if (availableSlots.length === 0) {
-            showError('No available slots');
-            return;
-        }
-
-        if (availableSlots.find(s => s.id === slot)) {
-            if (parkVehicle(slot, plateNumber, sticker)) {
-                setStickerInput('');
-                setSlotInput('');
-            }
-        } else {
-            showError('Invalid slot number');
         }
     };
 
@@ -499,287 +384,6 @@ export default function UserDashboard() {
 
         return lines.join('\n');
     };
-
-    const isGuestReservationWindow = (slot) => {
-        const reservationInfo = getReservationInfo(slot);
-        const reservedSticker = (slot?.reservedStickerId || '').trim().toUpperCase();
-        return !!reservationInfo && (reservationInfo.isActive || reservationInfo.isOverdue) && reservedSticker === 'N/A';
-    };
-
-    const handleParkSelectedSpot = () => {
-        const selectedSlot = getSelectedParkingSlot();
-
-        if (!selectedSlot) {
-            showError('Please select a parking spot first.');
-            return;
-        }
-
-        if (selectedSlot.status !== 'available') {
-            showError('Selected spot is already occupied.');
-            return;
-        }
-
-        const reservationInfo = getReservationInfo(selectedSlot);
-
-        if (isGuestReservationWindow(selectedSlot)) {
-            const guestPlateNumber = (parkPlateInput || '').trim().toUpperCase();
-            if (!guestPlateNumber) {
-                showError('Plate number is required for this multiple reservation parking.');
-                return;
-            }
-
-            const updatedSlots = parkingSlots.map((slot) =>
-                slot.id === selectedSlot.id
-                    ? {
-                        ...slot,
-                        status: 'occupied',
-                        plateNumber: guestPlateNumber,
-                        stickerId: 'GUEST',
-                        entryTime: new Date().toISOString(),
-                        reservedFor: null,
-                        reservedStickerId: ''
-                    }
-                    : slot
-            );
-            setParkingSlots(updatedSlots);
-            localStorage.setItem('parkingSlots', JSON.stringify(updatedSlots));
-            setParkStickerInput('');
-            setParkPlateInput('');
-            setShowParkForSelectedSpot(false);
-            showSuccess(`Vehicle ${guestPlateNumber} parked in slot ${selectedSlot.id}`);
-            return;
-        }
-
-        if (!parkStickerInput.trim()) {
-            showError('Please enter your UA sticker ID.');
-            return;
-        }
-
-        const sticker = parkStickerInput.trim().toUpperCase();
-        const reservedSticker = (selectedSlot.reservedStickerId || '').trim().toUpperCase();
-
-        if (reservationInfo && (reservationInfo.isActive || reservationInfo.isOverdue) && reservedSticker && reservedSticker !== sticker) {
-            showError('This slot has an active/overdue reservation. Guard can release expired reservations after checking no-show.');
-            return;
-        }
-
-        const plateNumber = getPlateFromSticker(sticker);
-        if (!plateNumber) {
-            showError('Invalid sticker ID or not valid for the current semester.');
-            return;
-        }
-
-        if (parkVehicle(selectedSlot.id, plateNumber, sticker)) {
-            setParkStickerInput('');
-            setShowParkForSelectedSpot(false);
-        }
-    };
-
-    const handleGuardReleaseReservation = async () => {
-        const selectedSlot = getSelectedParkingSlot();
-        if (!selectedSlot) return;
-
-        const reservationInfo = getReservationInfo(selectedSlot);
-        if (!reservationInfo || !reservationInfo.isOverdue) {
-            showError('Only overdue reservations can be released.');
-            return;
-        }
-
-        const parseSpots = (res) => {
-            let spots = [];
-            if (Array.isArray(res.reserved_spots)) {
-                spots = res.reserved_spots;
-            } else {
-                try { spots = JSON.parse(res.reserved_spots || '[]'); } catch { spots = []; }
-            }
-            return spots.map(s => parseInt(s, 10)).filter(s => !Number.isNaN(s));
-        };
-
-        const matchingReservation = userReservations.find(res => {
-            if ((res.status || '').toLowerCase() !== 'approved') return false;
-            const resTime = new Date(res.reserved_for_datetime).getTime();
-            const slotTime = new Date(selectedSlot.reservedFor).getTime();
-            if (resTime !== slotTime) return false;
-            const spots = parseSpots(res);
-            return spots.includes(selectedSlot.id);
-        });
-
-        if (matchingReservation) {
-            try {
-                await axios.post('http://127.0.0.1:8000/api/update-reservation-admin/', {
-                    reservation_id: matchingReservation.id,
-                    status: 'cancelled',
-                    admin_notes: 'Released due to no-show',
-                    requester_username: user.username,
-                    auth_token: user.authToken || ''
-                });
-
-                const spotsToRelease = parseSpots(matchingReservation);
-                const updatedSlots = parkingSlots.map(slot =>
-                    spotsToRelease.includes(slot.id)
-                        ? { ...slot, reservedStickerId: '', reservedFor: null }
-                        : slot
-                );
-                setParkingSlots(updatedSlots);
-                localStorage.setItem('parkingSlots', JSON.stringify(updatedSlots));
-                fetchUserReservations();
-                showInfo(`Reservation cancelled. Spot(s) ${spotsToRelease.join(', ')} released.`);
-                return;
-            } catch (err) {
-                // Optional fallback log, but we'll fall through to local storage clear below
-                console.error("Backend failed cancel: ", err);
-            }
-        }
-
-        const updatedSlots = parkingSlots.map(slot =>
-            slot.id === selectedSlot.id
-                ? { ...slot, reservedStickerId: '', reservedFor: null }
-                : slot
-        );
-        setParkingSlots(updatedSlots);
-        localStorage.setItem('parkingSlots', JSON.stringify(updatedSlots));
-        showInfo(`Reservation cleared for spot ${selectedSlot.id}.`);
-    };
-
-    /**
-     * Remove vehicle from parking by slot number or plate number.
-     */
-    const leaveParking = (identifier) => {
-        const trimmed = (identifier || '').trim();
-        const normalized = trimmed.toUpperCase();
-
-        let slot = null;
-        if (/^\d+$/.test(trimmed)) {
-            const slotId = parseInt(trimmed, 10);
-            slot = parkingSlots.find(s => s.id === slotId && s.status === 'occupied');
-        } else {
-            slot = parkingSlots.find(
-                s => (s.plateNumber || '').trim().toUpperCase() === normalized && s.status === 'occupied'
-            );
-        }
-
-        if (!slot) {
-            showError('Vehicle or slot not found, or slot is already available.');
-            return;
-        }
-
-        const updatedSlots = parkingSlots.map(s =>
-            s.id === slot.id ? { ...s, status: 'available', plateNumber: '', stickerId: '', entryTime: null } : s
-        );
-        setParkingSlots(updatedSlots);
-        localStorage.setItem('parkingSlots', JSON.stringify(updatedSlots));
-        showInfo(`Vehicle ${slot.plateNumber} left slot ${slot.id} successfully.`);
-    };
-
-    /**
-     * Handle leaving parking with proper form validation.
-     */
-    const handleLeaveParking = () => {
-        if (!leaveIdentifier.trim()) {
-            showError('Please enter plate number or slot number');
-            return;
-        }
-        leaveParking(leaveIdentifier.trim());
-        setLeaveIdentifier('');
-    };
-
-    const isCurrentUserSpot = (slot) => {
-        if (!slot || !slot.stickerId) return false;
-        const normalizedSlotSticker = (slot.stickerId || '').trim().toUpperCase();
-        if (!normalizedSlotSticker) return false;
-
-        return records.some((record) => {
-            const recordSticker = (record.sticker_id || '').trim().toUpperCase();
-            return recordSticker && recordSticker === normalizedSlotSticker;
-        });
-    };
-
-    const handleLeaveSelectedSpot = () => {
-        const selectedSlot = getSelectedParkingSlot();
-        if (!selectedSlot) {
-            showError('Please select a parking spot first.');
-            return;
-        }
-
-        if (selectedSlot.status !== 'occupied') {
-            showError('Selected spot is not occupied.');
-            return;
-        }
-
-        if (!isCurrentUserSpot(selectedSlot)) {
-            showError('You can only leave/check out your own occupied spot.');
-            return;
-        }
-
-        setLeaveConfirmSlotId(selectedSlot.id);
-        setShowLeaveConfirmModal(true);
-    };
-
-    const handleConfirmLeaveSelectedSpot = () => {
-        if (!leaveConfirmSlotId) {
-            setShowLeaveConfirmModal(false);
-            return;
-        }
-
-        leaveParking(String(leaveConfirmSlotId));
-        setSelectedParkingSlotId(null);
-        setLeaveConfirmSlotId(null);
-        setShowLeaveConfirmModal(false);
-    };
-
-    const getParkingSlotFill = (slot) => {
-        if (selectedParkingSlotId === slot.id) {
-            return {
-                background: 'linear-gradient(180deg, #0f766e 0%, #14b8a6 100%)',
-                borderColor: '#0f766e',
-                color: '#ffffff',
-                shadow: '0 10px 24px rgba(20, 184, 166, 0.28)'
-            };
-        }
-
-        if (slot.status === 'occupied') {
-            return {
-                background: 'linear-gradient(180deg, #fee2e2 0%, #fecaca 100%)',
-                borderColor: '#ef4444',
-                color: '#991b1b',
-                shadow: '0 8px 18px rgba(239, 68, 68, 0.18)'
-            };
-        }
-
-        const reservationInfo = getReservationInfo(slot);
-        if (reservationInfo) {
-            if (reservationInfo.isUpcoming) return {
-                background: 'linear-gradient(180deg, #f3f4f6 0%, #e5e7eb 100%)',
-                borderColor: '#9ca3af',
-                color: '#374151',
-                shadow: '0 8px 18px rgba(156, 163, 175, 0.18)'
-            };
-
-            return {
-                background: reservationInfo.isOverdue
-                    ? 'linear-gradient(180deg, #fef3c7 0%, #fde68a 100%)'
-                    : 'linear-gradient(180deg, #fef9c3 0%, #fde68a 100%)',
-                borderColor: reservationInfo.isOverdue ? '#d97706' : '#ca8a04',
-                color: '#78350f',
-                shadow: '0 8px 18px rgba(202, 138, 4, 0.18)'
-            };
-        }
-
-        return {
-            background: 'linear-gradient(180deg, #f3f4f6 0%, #e5e7eb 100%)',
-            borderColor: '#9ca3af',
-            color: '#374151',
-            shadow: '0 8px 18px rgba(156, 163, 175, 0.18)'
-        };
-    };
-
-    const getSelectedParkingSlot = () => parkingSlots.find(slot => slot.id === selectedParkingSlotId) || null;
-
-    useEffect(() => {
-        setShowParkForSelectedSpot(false);
-        setParkStickerInput('');
-        setParkPlateInput('');
-    }, [selectedParkingSlotId, selectedParkingAreaName]);
 
     // Get unread notifications (application updates + reservation status updates)
     const applicationNotifications = records.filter(r => r.is_seen === false);
@@ -856,6 +460,7 @@ export default function UserDashboard() {
         if (escalationChanged) {
             localStorage.setItem('personnelEscalationNotifs', JSON.stringify(escalationNotif.slice(-500)));
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [parkingSlots, userReservations, user, timeTick]);
 
     useEffect(() => {
@@ -955,15 +560,6 @@ export default function UserDashboard() {
             localStorage.setItem('parkingSlots', JSON.stringify(syncedSlots));
         }
     }, [userReservations, parkingSlots]);
-
-    /**
-     * Handle Enter key press for application form
-     */
-    const handleApplicationKeyPress = (e) => {
-        if (e.key === 'Enter') {
-            handleProceedToPayment(e);
-        }
-    };
 
     /**
      * Mark all notifications as read for the current user.
@@ -1085,71 +681,16 @@ export default function UserDashboard() {
         }
     };
 
-    const handleProceedToPayment = (e) => {
-        e.preventDefault();
-        const rawPlate = (plate || '').trim();
-        if (!rawPlate) {
-            showError('Please enter Plate Number before proceeding to payment.');
-            return;
-        }
-        if (/[a-z]/.test(rawPlate)) {
-            showError('Uppercase only: please enter your plate number in uppercase letters.');
-            return;
-        }
-        setShowPaymentModal(true);
-    };
-
     if (!user) return null;
 
     const normalizedRole = (user.role || '').toLowerCase();
-    const isAdmin = normalizedRole === 'admin';
     const isGuest = normalizedRole === 'guest' || normalizedRole === 'non-student';
     const roleLabel = isGuest ? 'NON-STUDENT' : (user.role?.toUpperCase() || 'USER');
-    const validStickerList = getValidUserStickers();
-    const occupiedCount = parkingSlots.filter(slot => slot.status === 'occupied').length;
-    const pendingReservationsCount = userReservations.filter(res => res.status === 'pending').length;
-    const displayParkingSlots = Array.from({ length: TOTAL_PARKING_SLOTS }, (_, i) => {
-        return parkingSlots.find(slot => slot.id === i + 1) || {
-            id: i + 1,
-            status: 'available',
-            plateNumber: '',
-            stickerId: '',
-            entryTime: null,
-            reservedFor: null,
-            reservedStickerId: ''
-        };
-    });
-    const parkingAreas = [
-        { name: 'Old Parking Space', startId: 1, slotCount: 40, slotsPerRow: 10, totalRows: 4 },
-        { name: 'Vertical Parking Space', startId: 41, slotCount: 50, slotsPerRow: 10, totalRows: 5 },
-        { name: 'New Parking Space', startId: 91, slotCount: 90, slotsPerRow: 15, totalRows: 6 }
-    ];
-    const selectedParkingArea = parkingAreas.find(area => area.name === selectedParkingAreaName) || parkingAreas[0];
-    const visibleParkingAreas = [selectedParkingArea];
-    const selectedParkingSlot = getSelectedParkingSlot();
     const displayFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username;
 
-    const USER_RECORDS_PAGE_SIZE = 10;
-    const USER_RESERVATIONS_PAGE_SIZE = 10;
-
-    const orderedUserApplicationRecords = records.slice().reverse();
-    const userApplicationTotalPages = Math.max(1, Math.ceil(orderedUserApplicationRecords.length / USER_RECORDS_PAGE_SIZE));
-    const safeApplicationRecordsPage = Math.min(applicationRecordsPage, userApplicationTotalPages);
-    const paginatedUserApplicationRecords = orderedUserApplicationRecords.slice(
-        (safeApplicationRecordsPage - 1) * USER_RECORDS_PAGE_SIZE,
-        (safeApplicationRecordsPage - 1) * USER_RECORDS_PAGE_SIZE + USER_RECORDS_PAGE_SIZE
-    );
-
-    const userReservationsTotalPages = Math.max(1, Math.ceil(userReservations.length / USER_RESERVATIONS_PAGE_SIZE));
-    const safeUserReservationsPage = Math.min(userReservationsPage, userReservationsTotalPages);
-    const paginatedUserReservations = userReservations.slice(
-        (safeUserReservationsPage - 1) * USER_RESERVATIONS_PAGE_SIZE,
-        (safeUserReservationsPage - 1) * USER_RESERVATIONS_PAGE_SIZE + USER_RESERVATIONS_PAGE_SIZE
-    );
-
     return (
-        <div className="center dashboard-bg">
-            <div className="card dashboard-card">
+        <div className="center dashboard-bg full-bleed-layout">
+            <div className="card dashboard-card full-bleed-card">
                 
                 <div className="header-banner">
                     <img src={ualogo} alt="UA Logo" />
@@ -1377,56 +918,6 @@ export default function UserDashboard() {
                     getSlotTooltipText={getSlotTooltipText}
                     fetchUserReservations={fetchUserReservations}
                 />
-                {showLeaveConfirmModal && (
-                    <div style={{
-                        position: 'fixed',
-                        inset: 0,
-                        background: 'rgba(15, 23, 42, 0.55)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        zIndex: 10000,
-                        padding: '16px'
-                    }}>
-                        <div style={{
-                            width: '100%',
-                            maxWidth: '420px',
-                            background: '#ffffff',
-                            borderRadius: '14px',
-                            boxShadow: '0 18px 42px rgba(15, 23, 42, 0.22)',
-                            border: '1px solid #e2e8f0',
-                            padding: '18px'
-                        }}>
-                            <h3 style={{ margin: '0 0 8px', color: '#0f172a', fontSize: '1rem' }}>Confirm Check Out</h3>
-                            <p style={{ margin: '0 0 14px', color: '#475569', fontSize: '13px' }}>
-                                Leave/check out spot #{leaveConfirmSlotId} now?
-                            </p>
-
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                                <button
-                                    type="button"
-                                    className="btn-green"
-                                    onClick={handleConfirmLeaveSelectedSpot}
-                                    style={{ flex: 1, marginTop: 0 }}
-                                >
-                                    Yes, Check Out
-                                </button>
-                                <button
-                                    type="button"
-                                    className="btn-gray"
-                                    onClick={() => {
-                                        setShowLeaveConfirmModal(false);
-                                        setLeaveConfirmSlotId(null);
-                                    }}
-                                    style={{ flex: 1, marginTop: 0 }}
-                                >
-                                    Cancel
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
             </div>
         </div>
     );

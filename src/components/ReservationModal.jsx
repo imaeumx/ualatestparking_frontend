@@ -16,6 +16,8 @@ export default function ReservationModal({
     // Single-spot fields
     reserveStickerInput,
     setReserveStickerInput,
+    reservePlateInput,
+    setReservePlateInput,
     reservationReasonText,
     setReservationReasonText,
 
@@ -156,7 +158,20 @@ export default function ReservationModal({
                     </>
                 ) : (
                     <>
-                        {/* Multi-spot mode starts with category selection. */}
+                        {/* Multi-spot reservations now require a plate number for audit trail and guard validation. */}
+                        <div style={{ marginBottom: '12px' }}>
+                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                                Plate Number
+                            </label>
+                            <input
+                                type="text"
+                                value={reservePlateInput}
+                                onChange={(e) => setReservePlateInput(e.target.value)}
+                                placeholder="Enter Plate Number"
+                            />
+                        </div>
+
+                        {/* Category drives which extra fields are required by the admin review workflow. */}
                         <div style={{ marginBottom: '12px' }}>
                             <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
                                 Reason Category

@@ -4,6 +4,7 @@ import axios from 'axios';
 import ParkingReservationPanel from './ParkingReservationPanel';
 import ReservationModal from './ReservationModal';
 import StickerManagement from './StickerManagement';
+import { encryptDESStable } from '../utils/desCrypto';
 
 /**
  * ParkingManagement Component
@@ -53,6 +54,7 @@ export default function ParkingManagement({
     // ============ RESERVATION FORM FIELD STATE ============
     // Purpose: Store all user inputs needed for single or multi-spot reservation submission
     const [reserveStickerInput, setReserveStickerInput] = useState(''); // Single-spot only: user selects which UA sticker to use
+    const [reservePlateInput, setReservePlateInput] = useState(''); // Multi-spot only: guest plate number for the reservation
     const [reserveDate, setReserveDate] = useState(''); // Reservation date (format: "YYYY-MM-DD")
     const [reserveTime, setReserveTime] = useState(''); // Reservation time (format: "HH:MM", 24-hour)
     const [reservationReasonText, setReservationReasonText] = useState(''); // Single-spot: short reason | Multi-spot: detailed reason/description
@@ -63,6 +65,7 @@ export default function ParkingManagement({
     const [reservationRequesterName, setReservationRequesterName] = useState(''); // Multi-spot all categories: full name of person requesting the reservation
     const [reservationOrgPosition, setReservationOrgPosition] = useState(''); // Multi-spot, org events only: position held by requester in organization
     const [reservationModalError, setReservationModalError] = useState(''); // Error message displayed in modal (cleared on each submit attempt)
+    const [approvedMapReservations, setApprovedMapReservations] = useState([]);
     
     // ============ PARKING AREAS CONFIGURATION ============
     // Static layout definition for all three campus parking lots.
@@ -76,6 +79,121 @@ export default function ParkingManagement({
         // New Parking Space: 90 total slots arranged in 6 rows of 15 columns
         { name: 'New Parking Space', startId: 91, slotCount: 90, slotsPerRow: 15, totalRows: 6 }
     ];
+
+    const parseReservationSpots = (reservation) => {
+        if (!reservation) return [];
+        if (Array.isArray(reservation.reserved_spots)) {
+            return reservation.reserved_spots
+                .map((spot) => parseInt(spot, 10))
+                .filter((spot) => !Number.isNaN(spot));
+        }
+
+        try {
+            // Backend may return reserved_spots as a JSON string; normalize both shapes.
+            const parsed = JSON.parse(reservation.reserved_spots || '[]');
+            return Array.isArray(parsed)
+                ? parsed.map((spot) => parseInt(spot, 10)).filter((spot) => !Number.isNaN(spot))
+                : [];
+        } catch {
+            return [];
+        }
+    };
+
+    const getSpotLabel = (spotId) => {
+        const numericSpotId = parseInt(spotId, 10);
+        if (Number.isNaN(numericSpotId)) return '---';
+
+        const area = parkingAreas.find((item) => numericSpotId >= item.startId && numericSpotId < item.startId + item.slotCount);
+        if (!area) return String(numericSpotId);
+
+        const localIndex = numericSpotId - area.startId;
+        const row = Math.floor(localIndex / area.slotsPerRow);
+        const col = (localIndex % area.slotsPerRow) + 1;
+        const rowLetter = String.fromCharCode(65 + row);
+        return `${rowLetter}${col}`;
+    };
+
+    const formatReservationTimeOnly = (value) => {
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return '---';
+        return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    };
+
+    const formatReservationDateOnly = (value) => {
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return '---';
+        return d.toLocaleDateString();
+    };
+
+    const getReservationUserDisplay = (rawUsername) => {
+        const username = (rawUsername || '').trim();
+        if (!username) return '---';
+
+        const currentUsername = (user?.username || '').trim();
+        if (currentUsername && username.toLowerCase() === currentUsername.toLowerCase()) {
+            return username;
+        }
+
+        try {
+            return encryptDESStable(username);
+        } catch {
+            return '***';
+        }
+    };
+
+    const getReservationForSlot = (slot) => {
+        if (!slot?.id || !slot?.reservedFor) return null;
+
+        const slotTime = new Date(slot.reservedFor).getTime();
+        if (Number.isNaN(slotTime)) return null;
+
+        // Prefer the global approved map feed; fallback to local reservations if map feed is unavailable.
+        const approvedReservations = Array.isArray(approvedMapReservations) && approvedMapReservations.length > 0
+            ? approvedMapReservations.filter((reservation) => (reservation?.status || '').toLowerCase() === 'approved')
+            : (Array.isArray(userReservations)
+                ? userReservations.filter((reservation) => (reservation?.status || '').toLowerCase() === 'approved')
+                : []);
+
+        return approvedReservations.find((reservation) => {
+            const spots = parseReservationSpots(reservation);
+            if (!spots.includes(slot.id)) return false;
+
+            const reservationTime = new Date(reservation.reserved_for_datetime || '').getTime();
+            return !Number.isNaN(reservationTime) && reservationTime === slotTime;
+        }) || null;
+    };
+
+    const formatReservationSpotList = (reservation) => {
+        const spots = parseReservationSpots(reservation);
+        if (spots.length === 0) return '---';
+
+        return spots.join(', ');
+    };
+
+    useEffect(() => {
+        const fetchApprovedReservationsForMap = async () => {
+            const authToken = user?.authToken || '';
+            if (!authToken) {
+                setApprovedMapReservations([]);
+                return;
+            }
+
+            try {
+                // Pulling approved reservations keeps the map synchronized across all users.
+                const response = await axios.get('http://127.0.0.1:8000/api/approved-reservations-map/', {
+                    params: {
+                        auth_token: authToken
+                    }
+                });
+
+                setApprovedMapReservations(Array.isArray(response.data) ? response.data : []);
+            } catch {
+                setApprovedMapReservations([]);
+            }
+        };
+
+        fetchApprovedReservationsForMap();
+    }, [user?.authToken, userReservations.length]);
 
     // ============ EFFECT: AUTO-RESET FORMS ON SELECTION CHANGE ============
     // Trigger: User clicks a different parking slot OR switches to a different parking lot.
@@ -122,12 +240,14 @@ export default function ParkingManagement({
 
         const reservationInfo = getReservationInfo(slot);
         if (reservationInfo) {
-            if (reservationInfo.isUpcoming) return {
-                background: 'linear-gradient(180deg, #f3f4f6 0%, #e5e7eb 100%)',
-                borderColor: '#9ca3af',
-                color: '#374151',
-                shadow: '0 8px 18px rgba(156, 163, 175, 0.18)'
-            };
+            if (reservationInfo.isUpcoming) {
+                return {
+                    background: 'linear-gradient(180deg, #f3f4f6 0%, #e5e7eb 100%)',
+                    borderColor: '#9ca3af',
+                    color: '#374151',
+                    shadow: '0 8px 18px rgba(156, 163, 175, 0.18)'
+                };
+            }
 
             return {
                 background: reservationInfo.isOverdue
@@ -426,8 +546,10 @@ export default function ParkingManagement({
         // Reset form and open modal
         if (normalizedSpots.length === 1) {
             setReserveStickerInput(validUserStickers[0] || '');
+            setReservePlateInput('');
         } else {
             setReserveStickerInput('');
+            setReservePlateInput('');
         }
         setReserveDate('');
         setReserveTime('');
@@ -505,9 +627,15 @@ export default function ParkingManagement({
         } else {
             // Multi-spot reservations are treated as organizational/guest-style requests.
             reservationCategoryPayload = reservationReasonCategory;
+            const plateNumber = (reservePlateInput || '').trim().toUpperCase();
 
             if (!reservationReasonCategory) {
                 setReservationModalError('Please choose a Reason Category first.');
+                return;
+            }
+
+            if (!plateNumber) {
+                setReservationModalError('Please enter Plate Number.');
                 return;
             }
 
@@ -529,7 +657,7 @@ export default function ParkingManagement({
                     setReservationModalError('Please enter the name of person requesting the reservation.');
                     return;
                 }
-                finalReason = `Category: School Related Event | Event: ${reservationEventName.trim()} | Activity Form No: ${reservationActivityForm.trim()} | Requester: ${reservationRequesterName.trim()} | Details: ${reservationReasonText.trim()}`;
+                finalReason = `Category: School Related Event | Plate Number: ${plateNumber} | Event: ${reservationEventName.trim()} | Activity Form No: ${reservationActivityForm.trim()} | Requester: ${reservationRequesterName.trim()} | Details: ${reservationReasonText.trim()}`;
             } else if (reservationReasonCategory === 'Org Related Event') {
                 if (!reservationOrgName.trim()) {
                     setReservationModalError('Please enter Org Name.');
@@ -551,13 +679,13 @@ export default function ParkingManagement({
                     setReservationModalError('Please enter Org Position.');
                     return;
                 }
-                finalReason = `Category: Org Related Event | Org: ${reservationOrgName.trim()} | Event: ${reservationEventName.trim()} | Activity Form: ${reservationActivityForm.trim()} | Requester: ${reservationRequesterName.trim()} | Position: ${reservationOrgPosition.trim()} | Details: ${reservationReasonText.trim()}`;
+                finalReason = `Category: Org Related Event | Plate Number: ${plateNumber} | Org: ${reservationOrgName.trim()} | Event: ${reservationEventName.trim()} | Activity Form: ${reservationActivityForm.trim()} | Requester: ${reservationRequesterName.trim()} | Position: ${reservationOrgPosition.trim()} | Details: ${reservationReasonText.trim()}`;
             } else {
                 if (!reservationRequesterName.trim()) {
                     setReservationModalError('Please enter the name of person requesting the reservation.');
                     return;
                 }
-                finalReason = `Category: Others | Requester: ${reservationRequesterName.trim()} | Details: ${reservationReasonText.trim()}`;
+                finalReason = `Category: Others | Plate Number: ${plateNumber} | Requester: ${reservationRequesterName.trim()} | Details: ${reservationReasonText.trim()}`;
             }
         }
 
@@ -583,6 +711,7 @@ export default function ParkingManagement({
                     
                     // Clear form and reset state
                     setReserveStickerInput('');
+                    setReservePlateInput('');
                     setReserveDate('');
                     setReserveTime('');
                     setReservationReasonText('');
@@ -616,6 +745,7 @@ export default function ParkingManagement({
         setShowReservationModal(false);
         setReservationModalError('');
         setReserveStickerInput('');
+        setReservePlateInput('');
         setReserveDate('');
         setReserveTime('');
         setReservationReasonText('');
@@ -648,6 +778,13 @@ export default function ParkingManagement({
     const visibleParkingAreas = [selectedParkingArea];
     // Memo-like helper call for selected slot details panel.
     const selectedParkingSlot = getSelectedParkingSlot();
+    const selectedSlotReservation = getReservationForSlot(selectedParkingSlot);
+    const selectedSlotReservationSpots = selectedSlotReservation
+        ? formatReservationSpotList(selectedSlotReservation)
+        : '';
+    const selectedSpotStatusText = selectedSlotReservation
+        ? 'Reserved'
+        : getSlotStatusText(selectedParkingSlot || {});
     const selectedMainTab = parentActiveTab === 'stickers' ? 'stickers' : activeTab;
 
     return (
@@ -738,12 +875,24 @@ export default function ParkingManagement({
                     <div style={{ border: '1px solid #cbd5e1', borderRadius: '12px', padding: '10px', background: '#f8fafc' }}>
                         <h4 style={{ margin: '0 0 8px', color: '#0f172a', fontSize: '0.9rem' }}>Spot Interaction</h4>
                         {selectedParkingSlot ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
-                                <div><span style={{ color: '#64748b' }}>Spot ID:</span> <strong>{selectedParkingSlot.id}</strong></div>
-                                <div><span style={{ color: '#64748b' }}>Status:</span> <strong>{getSlotStatusText(selectedParkingSlot)}</strong></div>
-                                <div><span style={{ color: '#64748b' }}>Assigned Sticker ID:</span> <strong>{selectedParkingSlot.stickerId || '---'}</strong></div>
-                                <div><span style={{ color: '#64748b' }}>Reserved For:</span> <strong>{formatDateTime(selectedParkingSlot.reservedFor)}</strong></div>
-                                <div><span style={{ color: '#64748b' }}>Reserved Sticker:</span> <strong>{selectedParkingSlot.reservedStickerId || '---'}</strong></div>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', fontSize: '11px', lineHeight: 1.2 }}>
+                                <div style={{ width: '100%', textAlign: 'left' }}><span style={{ color: '#64748b' }}>Spot ID:</span> <strong>{selectedParkingSlot.id}</strong></div>
+                                <div style={{ width: '100%', textAlign: 'left' }}><span style={{ color: '#64748b' }}>Status:</span> <strong>{selectedSpotStatusText}</strong></div>
+                                {selectedSlotReservation ? (
+                                    <>
+                                        <div style={{ width: '100%', textAlign: 'left', wordBreak: 'break-word' }}><span style={{ color: '#64748b' }}>User:</span> <strong>{getReservationUserDisplay(selectedSlotReservation.applicant_username)}</strong></div>
+                                        <div style={{ width: '100%', textAlign: 'left' }}><span style={{ color: '#64748b' }}>Sticker:</span> <strong>{selectedSlotReservation.sticker_id || selectedParkingSlot.reservedStickerId || '---'}</strong></div>
+                                        <div style={{ width: '100%', textAlign: 'left' }}><span style={{ color: '#64748b' }}>Slot/s:</span> <strong>{selectedSlotReservationSpots || getSpotLabel(selectedParkingSlot.id)}</strong></div>
+                                        <div style={{ width: '100%', textAlign: 'left' }}><span style={{ color: '#64748b' }}>Date:</span> <strong>{formatReservationDateOnly(selectedSlotReservation.reserved_for_datetime)}</strong></div>
+                                        <div style={{ width: '100%', textAlign: 'left' }}><span style={{ color: '#64748b' }}>Time:</span> <strong>{formatReservationTimeOnly(selectedSlotReservation.reserved_for_datetime)}</strong></div>
+                                    </>
+                                ) : (
+                                    <>
+                                        <div style={{ width: '100%', textAlign: 'left' }}><span style={{ color: '#64748b' }}>Assigned Sticker ID:</span> <strong>{selectedParkingSlot.stickerId || '---'}</strong></div>
+                                        <div style={{ width: '100%', textAlign: 'left' }}><span style={{ color: '#64748b' }}>Reserved For:</span> <strong>{formatDateTime(selectedParkingSlot.reservedFor)}</strong></div>
+                                        <div style={{ width: '100%', textAlign: 'left' }}><span style={{ color: '#64748b' }}>Reserved Sticker:</span> <strong>{selectedParkingSlot.reservedStickerId || '---'}</strong></div>
+                                    </>
+                                )}
 
                                 {(selectedParkingSlot.status === 'available' || isMultiSelectMode) && (
                                     // Action group for reserve/park workflows on available spots.
@@ -793,7 +942,7 @@ export default function ParkingManagement({
                                             </div>
                                         )}
 
-                                        <div style={{ display: 'flex', gap: '8px' }}>
+                                        <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
                                             <button
                                                 type="button"
                                                 className="btn-blue"
@@ -810,8 +959,11 @@ export default function ParkingManagement({
                                                 disabled={isMultiSelectMode}
                                                 style={{
                                                     marginTop: 0,
-                                                    padding: '8px 10px',
+                                                    padding: '9px 14px',
                                                     fontSize: '12px',
+                                                    minWidth: '88px',
+                                                    whiteSpace: 'nowrap',
+                                                    width: 'auto',
                                                     opacity: isMultiSelectMode ? 0.5 : 1,
                                                     cursor: isMultiSelectMode ? 'not-allowed' : 'pointer'
                                                 }}
@@ -822,7 +974,7 @@ export default function ParkingManagement({
                                                 type="button"
                                                 className="btn-purple"
                                                 onClick={handleOpenReservationModal}
-                                                style={{ marginTop: 0, padding: '8px 10px', fontSize: '12px' }}
+                                                style={{ marginTop: 0, padding: '9px 14px', fontSize: '12px', minWidth: '132px', whiteSpace: 'nowrap', width: 'auto' }}
                                             >
                                                 {isMultiSelectMode
                                                     ? `Reserve Spot(s) (${selectedSpotsForReservation.size})`
@@ -1306,6 +1458,8 @@ export default function ParkingManagement({
                 reservationModalError={reservationModalError}
                 reserveStickerInput={reserveStickerInput}
                 setReserveStickerInput={setReserveStickerInput}
+                reservePlateInput={reservePlateInput}
+                setReservePlateInput={setReservePlateInput}
                 reservationReasonText={reservationReasonText}
                 setReservationReasonText={setReservationReasonText}
                 reservationReasonCategory={reservationReasonCategory}

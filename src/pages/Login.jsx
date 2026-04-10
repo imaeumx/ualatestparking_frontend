@@ -2,32 +2,10 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { usePopup } from '../components/PopupContext';
+import PasswordField from '../components/PasswordField';
 import API_BASE_URL from '../config/api';
 import ualogo from '../assets/ualogo.png';
 
-const PasswordEyeIcon = ({ hidden }) => (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" className="password-eye-icon">
-        <path
-            d="M2.2 12s3.6-6.2 9.8-6.2S21.8 12 21.8 12s-3.6 6.2-9.8 6.2S2.2 12 2.2 12Z"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-        />
-        <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" strokeWidth="1.8" />
-        {hidden && (
-            <path
-                d="M4 4l16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.9"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-            />
-        )}
-    </svg>
-);
 
 /**
  * Login Page
@@ -64,8 +42,6 @@ export default function Login() {
     // Shared credential inputs used by both login and registration.
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
-    const [showLoginPassword, setShowLoginPassword] = useState(false);
-    const [showRegisterPassword, setShowRegisterPassword] = useState(false);
     
     // Registration profile fields.
     const [fName, setFName] = useState('');
@@ -243,24 +219,13 @@ export default function Login() {
                                     onChange={(e) => setUsername(e.target.value)}
                                     onKeyDown={handleLoginKeyPress}
                                 />
-                                <div className="password-field">
-                                    <input
-                                        type={showLoginPassword ? 'text' : 'password'}
-                                        placeholder="Password"
-                                        value={password}
-                                        onChange={(e) => setPassword(e.target.value)}
-                                        onKeyDown={handleLoginKeyPress}
-                                        className="password-field-input"
-                                    />
-                                    <button
-                                        type="button"
-                                        className="password-toggle-btn"
-                                        onClick={() => setShowLoginPassword((prev) => !prev)}
-                                        aria-label={showLoginPassword ? 'Hide password' : 'Show password'}
-                                    >
-                                        <PasswordEyeIcon hidden={!showLoginPassword} />
-                                    </button>
-                                </div>
+                                <PasswordField
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    placeholder="Password"
+                                    onKeyDown={handleLoginKeyPress}
+                                    wrapperStyle={{ marginTop: '0' }}
+                                />
                                 <button className="btn-blue login-submit-btn" onClick={handleLogin}>Login</button>
                             </div>
 
@@ -314,24 +279,13 @@ export default function Login() {
 
                             <input type="email" placeholder="Email" value={email} style={{ marginTop: '8px' }} onChange={(e) => setEmail(e.target.value)} />
                             <input type="text" placeholder="Username" value={username} style={{ marginTop: '8px' }} onChange={(e) => setUsername(e.target.value)} />
-                            <div className="password-field" style={{ marginTop: '8px' }}>
-                                <input
-                                    type={showRegisterPassword ? 'text' : 'password'}
-                                    placeholder="Password"
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                    onKeyDown={handleRegisterKeyPress}
-                                    className="password-field-input"
-                                />
-                                <button
-                                    type="button"
-                                    className="password-toggle-btn"
-                                    onClick={() => setShowRegisterPassword((prev) => !prev)}
-                                    aria-label={showRegisterPassword ? 'Hide password' : 'Show password'}
-                                >
-                                    <PasswordEyeIcon hidden={!showRegisterPassword} />
-                                </button>
-                            </div>
+                            <PasswordField
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                placeholder="Password"
+                                onKeyDown={handleRegisterKeyPress}
+                                wrapperStyle={{ marginTop: '8px' }}
+                            />
 
                             <button className="btn-green login-submit-btn" onClick={handleRegister}>Create Account</button>
                             <p className="auth-switch login-switch-row">

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import PasswordField from '../components/PasswordField';
 import { usePopup } from '../components/PopupContext';
 import ParkingManagement from '../components/ParkingManagement';
 import { encryptDES, decryptDES } from '../utils/desCrypto';
@@ -537,23 +538,32 @@ export default function UserDashboard() {
         let changed = false;
         const syncedSlots = parkingSlots.map((slot) => {
             const update = updatesBySlot.get(slot.id);
-            if (!update) return slot;
-
-            // Don't overwrite a currently occupied slot; reservation is already consumed.
             if (slot.status === 'occupied') return slot;
 
-            const nextReservedFor = update.reservedFor || null;
-            const nextReservedSticker = update.reservedStickerId || '';
-            if (slot.reservedFor === nextReservedFor && slot.reservedStickerId === nextReservedSticker) {
-                return slot;
+            if (update) {
+                const nextReservedFor = update.reservedFor || null;
+                const nextReservedSticker = update.reservedStickerId || '';
+                if (slot.reservedFor === nextReservedFor && slot.reservedStickerId === nextReservedSticker) {
+                    return slot;
+                }
+                changed = true;
+                return {
+                    ...slot,
+                    reservedFor: nextReservedFor,
+                    reservedStickerId: nextReservedSticker
+                };
             }
 
-            changed = true;
-            return {
-                ...slot,
-                reservedFor: nextReservedFor,
-                reservedStickerId: nextReservedSticker
-            };
+            if (slot.reservedFor || slot.reservedStickerId) {
+                changed = true;
+                return {
+                    ...slot,
+                    reservedFor: null,
+                    reservedStickerId: ''
+                };
+            }
+
+            return slot;
         });
 
         if (changed) {
@@ -766,30 +776,27 @@ export default function UserDashboard() {
                             <h3 style={{ marginTop: 0, color: '#ffffff' }}>Account Settings</h3>
                             <div style={{ textAlign: 'left', marginTop: '15px' }}>
                                 <label className="small-label">Old Password</label>
-                                <input 
-                                    type="password" 
-                                    placeholder="Enter old password" 
-                                    value={oldPassword} 
-                                    onChange={(e) => setOldPassword(e.target.value)} 
-                                    style={{ marginBottom: '10px' }}
+                                <PasswordField
+                                    value={oldPassword}
+                                    onChange={(e) => setOldPassword(e.target.value)}
+                                    placeholder="Enter old password"
+                                    wrapperStyle={{ marginBottom: '10px' }}
                                 />
 
                                 <label className="small-label">New Password</label>
-                                <input 
-                                    type="password" 
-                                    placeholder="Enter new password" 
-                                    value={newPassword} 
-                                    onChange={(e) => setNewPassword(e.target.value)} 
-                                    style={{ marginBottom: '10px' }}
+                                <PasswordField
+                                    value={newPassword}
+                                    onChange={(e) => setNewPassword(e.target.value)}
+                                    placeholder="Enter new password"
+                                    wrapperStyle={{ marginBottom: '10px' }}
                                 />
 
                                 <label className="small-label">Confirm New Password</label>
-                                <input 
-                                    type="password" 
-                                    placeholder="Confirm new password" 
-                                    value={confirmNewPassword} 
-                                    onChange={(e) => setConfirmNewPassword(e.target.value)} 
-                                    style={{ marginBottom: '15px' }}
+                                <PasswordField
+                                    value={confirmNewPassword}
+                                    onChange={(e) => setConfirmNewPassword(e.target.value)}
+                                    placeholder="Confirm new password"
+                                    wrapperStyle={{ marginBottom: '15px' }}
                                 />
 
                                 <hr style={{ border: '0.5px solid #e2e8f0', margin: '15px 0' }} />

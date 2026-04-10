@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { usePopup } from '../components/PopupContext';
+import PasswordField from '../components/PasswordField';
 import { decryptDES } from '../utils/desCrypto';
 import API_BASE_URL from '../config/api';
 import ualogo from '../assets/ualogo.png';
@@ -244,6 +245,11 @@ export default function AdminPanel() {
         }
     };
 
+    useEffect(() => {
+        if (pendingReservations.length === 0 || parkingSlots.length === 0) return;
+        syncApprovedReservationsToSlots();
+    }, [pendingReservations, parkingSlots.length, syncApprovedReservationsToSlots]);
+
     // Normalize reservation.reserved_spots to integer slot IDs array.
     // Supports backend sending either JSON array or JSON-stringified array.
     const parseReservationSpots = (reservation) => {
@@ -358,6 +364,82 @@ export default function AdminPanel() {
         setParkingSlots(updatedSlots);
         localStorage.setItem('parkingSlots', JSON.stringify(updatedSlots));
     };
+
+    const syncApprovedReservationsToSlots = useCallback(() => {
+        if (parkingSlots.length === 0) return;
+
+        const approvedReservations = pendingReservations.filter(
+            (reservation) => (reservation.status || '').toLowerCase() === 'approved'
+        );
+        const updatesBySlot = new Map();
+
+        const getReservationPriority = (reservedAtIso) => {
+            const reservedAt = new Date(reservedAtIso);
+            if (Number.isNaN(reservedAt.getTime())) {
+                return { rank: -1, timeValue: 0 };
+            }
+
+            const graceEnd = new Date(reservedAt.getTime() + 30 * 60 * 1000);
+            if (new Date() > graceEnd) {
+                return { rank: 3, timeValue: reservedAt.getTime() };
+            }
+            if (new Date() >= reservedAt) {
+                return { rank: 2, timeValue: reservedAt.getTime() };
+            }
+            return { rank: 1, timeValue: -reservedAt.getTime() };
+        };
+
+        approvedReservations.forEach((reservation) => {
+            const reservedSticker = (reservation.sticker_id || '').trim().toUpperCase();
+            const reservedFor = reservation.reserved_for_datetime || null;
+            const nextPriority = getReservationPriority(reservedFor);
+            const normalizedSpots = parseReservationSpots(reservation);
+
+            normalizedSpots.forEach((spotId) => {
+                const current = updatesBySlot.get(spotId);
+                const shouldReplace = !current
+                    || nextPriority.rank > current.priority.rank
+                    || (nextPriority.rank === current.priority.rank && nextPriority.timeValue > current.priority.timeValue);
+                if (!shouldReplace) return;
+                updatesBySlot.set(spotId, {
+                    reservedFor,
+                    reservedStickerId: reservedSticker,
+                    priority: nextPriority
+                });
+            });
+        });
+
+        let changed = false;
+        const syncedSlots = parkingSlots.map((slot) => {
+            if (slot.status === 'occupied') return slot;
+            const update = updatesBySlot.get(slot.id);
+            if (update) {
+                if (slot.reservedFor !== update.reservedFor || slot.reservedStickerId !== update.reservedStickerId) {
+                    changed = true;
+                    return {
+                        ...slot,
+                        reservedFor: update.reservedFor,
+                        reservedStickerId: update.reservedStickerId
+                    };
+                }
+                return slot;
+            }
+            if (slot.reservedFor || slot.reservedStickerId) {
+                changed = true;
+                return {
+                    ...slot,
+                    reservedFor: null,
+                    reservedStickerId: ''
+                };
+            }
+            return slot;
+        });
+
+        if (changed) {
+            setParkingSlots(syncedSlots);
+            localStorage.setItem('parkingSlots', JSON.stringify(syncedSlots));
+        }
+    }, [parkingSlots, pendingReservations]);
 
     // Start inline edit mode for one reservation row.
     const beginReservationEdit = (reservation) => {
@@ -686,7 +768,19 @@ export default function AdminPanel() {
         });
 
         if (matchingReservation) {
-            // Only release the specific overdue slot. Keep the rest of the reservation intact.
+            try {
+                await axios.post(`${API_BASE_URL}/update-reservation-admin/`, {
+                    reservation_id: matchingReservation.id,
+                    status: 'cancelled',
+                    admin_notes: 'Released overdue reservation by personnel.',
+                    requester_username: currentUser.username,
+                    auth_token: currentUser.authToken || ''
+                });
+            } catch (err) {
+                showError(err?.response?.data?.message || 'Failed to update reservation status.');
+                return;
+            }
+
             const updatedSlots = parkingSlots.map(slot => 
                 slot.id === slotId
                     ? { ...slot, reservedFor: null, reservedStickerId: '' }
@@ -697,7 +791,7 @@ export default function AdminPanel() {
             localStorage.setItem('parkingSlots', JSON.stringify(updatedSlots));
 
             fetchPendingReservations();
-            addParkingLog('reservation_release', targetSlot, 'Released only this overdue spot after 30-minute no-show check.');
+            addParkingLog('reservation_release', targetSlot, 'Released overdue reservation and cancelled it in backend.');
             showInfo(`Spot ${slotId} released.`);
             return;
         }
@@ -1325,13 +1419,12 @@ export default function AdminPanel() {
                                     <div className="filter-controls" style={{ justifyContent: 'flex-end', display: 'flex', flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', gap: '8px', minWidth: 0 }}>
                                         {!isRootAdmin && (
                                             <>
-                                                <input
-                                                    type="password"
-                                                    className="table-filter"
-                                                    placeholder="Enter Secret Key"
+                                                <PasswordField
                                                     value={verifySecretKeyInput}
                                                     onChange={(e) => setVerifySecretKeyInput(e.target.value)}
-                                                    style={{ maxWidth: '180px', flex: '0 0 180px' }}
+                                                    placeholder="Enter Secret Key"
+                                                    wrapperStyle={{ maxWidth: '180px', flex: '0 0 180px' }}
+                                                    inputStyle={{ width: '100%' }}
                                                 />
                                                 <button
                                                     type="button"
@@ -1690,12 +1783,12 @@ export default function AdminPanel() {
                         </div>
                         {!isRootAdmin && (
                             <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', alignItems: 'center', marginTop: '10px', flexWrap: 'wrap' }}>
-                                <input
-                                    type="password"
-                                    placeholder="Enter Secret Key"
+                                <PasswordField
                                     value={verifySecretKeyInput}
                                     onChange={(e) => setVerifySecretKeyInput(e.target.value)}
-                                    style={{ textAlign: 'left', fontSize: '14px', padding: '10px 12px', width: '360px', maxWidth: '360px', height: '36px' }}
+                                    placeholder="Enter Secret Key"
+                                    wrapperStyle={{ width: '360px', maxWidth: '360px' }}
+                                    inputStyle={{ textAlign: 'left', fontSize: '14px', padding: '10px 12px', width: '100%', height: '36px' }}
                                 />
                                 <button className="btn-gray slim" onClick={handleVerifySecretKey} style={{ marginTop: 0, height: '36px', minWidth: '110px', fontSize: '12px', padding: '4px 10px' }}>
                                     Unlock
@@ -2410,7 +2503,12 @@ export default function AdminPanel() {
                         <input type="text" placeholder="Last Name" value={personnelLastName} onChange={(e) => setPersonnelLastName(e.target.value)} />
                         <input type="email" placeholder="Email" value={personnelEmail} onChange={(e) => setPersonnelEmail(e.target.value)} />
                         <input type="text" placeholder="Username" value={personnelUsername} onChange={(e) => setPersonnelUsername(e.target.value)} />
-                        <input type="password" placeholder="Password" value={personnelPassword} onChange={(e) => setPersonnelPassword(e.target.value)} />
+                        <PasswordField
+                            value={personnelPassword}
+                            onChange={(e) => setPersonnelPassword(e.target.value)}
+                            placeholder="Password"
+                            wrapperStyle={{ width: '100%' }}
+                        />
                         <select value={personnelRole} onChange={(e) => setPersonnelRole(e.target.value)}>
                             <option value="admin">Admin</option>
                             <option value="guard">Security Guard</option>

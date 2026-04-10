@@ -142,26 +142,72 @@ export default function ParkingManagement({
         }
     };
 
+    const getReservationInfoFromDateTime = (dateTimeValue) => {
+        const reservedAt = new Date(dateTimeValue || '');
+        if (Number.isNaN(reservedAt.getTime())) return null;
+
+        const graceEnd = new Date(reservedAt.getTime() + (30 * 60 * 1000));
+        const now = new Date();
+        return {
+            reservedAt,
+            graceEnd,
+            isUpcoming: now < reservedAt,
+            isActive: now >= reservedAt && now <= graceEnd,
+            isOverdue: now > graceEnd
+        };
+    };
+
     const getReservationForSlot = (slot) => {
-        if (!slot?.id || !slot?.reservedFor) return null;
+        if (!slot?.id) return null;
 
-        const slotTime = new Date(slot.reservedFor).getTime();
-        if (Number.isNaN(slotTime)) return null;
-
-        // Prefer the global approved map feed; fallback to local reservations if map feed is unavailable.
         const approvedReservations = Array.isArray(approvedMapReservations) && approvedMapReservations.length > 0
             ? approvedMapReservations.filter((reservation) => (reservation?.status || '').toLowerCase() === 'approved')
             : (Array.isArray(userReservations)
                 ? userReservations.filter((reservation) => (reservation?.status || '').toLowerCase() === 'approved')
                 : []);
 
-        return approvedReservations.find((reservation) => {
+        const matchingReservations = approvedReservations.filter((reservation) => {
             const spots = parseReservationSpots(reservation);
             if (!spots.includes(slot.id)) return false;
-
             const reservationTime = new Date(reservation.reserved_for_datetime || '').getTime();
-            return !Number.isNaN(reservationTime) && reservationTime === slotTime;
-        }) || null;
+            return !Number.isNaN(reservationTime);
+        });
+
+        if (matchingReservations.length === 0) return null;
+
+        const getPriority = (reservation) => {
+            const info = getReservationInfoFromDateTime(reservation.reserved_for_datetime);
+            if (!info) return { rank: -1, timeValue: 0 };
+            if (info.isOverdue) return { rank: 3, timeValue: info.reservedAt.getTime() };
+            if (info.isActive) return { rank: 2, timeValue: info.reservedAt.getTime() };
+            return { rank: 1, timeValue: -info.reservedAt.getTime() };
+        };
+
+        return matchingReservations.reduce((best, current) => {
+            if (!best) return current;
+            const bestPriority = getPriority(best);
+            const currentPriority = getPriority(current);
+            if (currentPriority.rank > bestPriority.rank) return current;
+            if (currentPriority.rank < bestPriority.rank) return best;
+            return currentPriority.timeValue > bestPriority.timeValue ? current : best;
+        }, null);
+    };
+
+    const getEffectiveReservationContext = (slot) => {
+        const reservation = getReservationForSlot(slot);
+        if (reservation) {
+            return {
+                reservation,
+                reservationInfo: getReservationInfoFromDateTime(reservation.reserved_for_datetime),
+                reservedStickerId: (reservation.sticker_id || '').trim().toUpperCase()
+            };
+        }
+
+        return {
+            reservation: null,
+            reservationInfo: getReservationInfo(slot),
+            reservedStickerId: (slot?.reservedStickerId || '').trim().toUpperCase()
+        };
     };
 
     const formatReservationSpotList = (reservation) => {
@@ -194,7 +240,9 @@ export default function ParkingManagement({
         };
 
         fetchApprovedReservationsForMap();
-    }, [user?.authToken, userReservations.length]);
+        const refreshTimer = setInterval(fetchApprovedReservationsForMap, 15000);
+        return () => clearInterval(refreshTimer);
+    }, [user?.authToken]);
 
     // ============ EFFECT: AUTO-RESET FORMS ON SELECTION CHANGE ============
     // Trigger: User clicks a different parking slot OR switches to a different parking lot.
@@ -239,7 +287,7 @@ export default function ParkingManagement({
             };
         }
 
-        const reservationInfo = getReservationInfo(slot);
+        const { reservationInfo } = getEffectiveReservationContext(slot);
         if (reservationInfo) {
             if (reservationInfo.isUpcoming) {
                 return {
@@ -296,8 +344,8 @@ export default function ParkingManagement({
     // Special case for multi-reservation parking where a guest plate can park.
     // In this flow, reservedStickerId uses 'N/A' instead of a specific user sticker.
     const isGuestReservationWindow = (slot) => {
-        const reservationInfo = getReservationInfo(slot);
-        const reservedSticker = (slot?.reservedStickerId || '').trim().toUpperCase();
+        const { reservationInfo, reservedStickerId } = getEffectiveReservationContext(slot);
+        const reservedSticker = reservedStickerId;
         return !!reservationInfo && (reservationInfo.isActive || reservationInfo.isOverdue) && reservedSticker === 'N/A';
     };
 
@@ -323,8 +371,7 @@ export default function ParkingManagement({
         }
 
         const targetSlot = parkingSlots.find(slot => slot.id === slotId);
-        const reservationInfo = getReservationInfo(targetSlot);
-        const reservedStickerId = (targetSlot?.reservedStickerId || '').trim().toUpperCase();
+        const { reservationInfo, reservedStickerId } = getEffectiveReservationContext(targetSlot);
         if (reservationInfo && (reservationInfo.isActive || reservationInfo.isOverdue) && reservedStickerId && reservedStickerId !== normalizedStickerId) {
             showError('This spot is reserved right now. Please choose another spot.');
             return false;
@@ -364,7 +411,7 @@ export default function ParkingManagement({
             return;
         }
 
-        const reservationInfo = getReservationInfo(selectedSlot);
+        const { reservationInfo, reservedStickerId } = getEffectiveReservationContext(selectedSlot);
 
         // Guest flow: used for multi-spot reservations tagged as N/A sticker.
         if (isGuestReservationWindow(selectedSlot)) {
@@ -403,7 +450,7 @@ export default function ParkingManagement({
 
         // Normalize user input before validation and matching.
         const sticker = parkStickerInput.trim().toUpperCase();
-        const reservedSticker = (selectedSlot.reservedStickerId || '').trim().toUpperCase();
+        const reservedSticker = reservedStickerId;
 
         if (reservationInfo && (reservationInfo.isActive || reservationInfo.isOverdue) && reservedSticker && reservedSticker !== sticker) {
             showError('This slot has an active/overdue reservation. Guard can release expired reservations after checking no-show.');
@@ -884,14 +931,14 @@ export default function ParkingManagement({
                                         <div style={{ width: '100%', textAlign: 'left', wordBreak: 'break-word' }}><span style={{ color: '#64748b' }}>User:</span> <strong>{getReservationUserDisplay(selectedSlotReservation.applicant_username)}</strong></div>
                                         <div style={{ width: '100%', textAlign: 'left' }}><span style={{ color: '#64748b' }}>Sticker:</span> <strong>{selectedSlotReservation.sticker_id || selectedParkingSlot.reservedStickerId || '---'}</strong></div>
                                         <div style={{ width: '100%', textAlign: 'left' }}><span style={{ color: '#64748b' }}>Slot/s:</span> <strong>{selectedSlotReservationSpots || getSpotLabel(selectedParkingSlot.id)}</strong></div>
-                                        <div style={{ width: '100%', textAlign: 'left' }}><span style={{ color: '#64748b' }}>Date:</span> <strong>{formatReservationDateOnly(selectedSlotReservation.reserved_for_datetime)}</strong></div>
-                                        <div style={{ width: '100%', textAlign: 'left' }}><span style={{ color: '#64748b' }}>Time:</span> <strong>{formatReservationTimeOnly(selectedSlotReservation.reserved_for_datetime)}</strong></div>
+                                        <div style={{ width: '100%', textAlign: 'left' }}><span style={{ color: '#64748b' }}>Date:</span> <strong>{formatReservationDateOnly(selectedSlotReservation.reserved_for_datetime || selectedParkingSlot.reservedFor)}</strong></div>
+                                        <div style={{ width: '100%', textAlign: 'left' }}><span style={{ color: '#64748b' }}>Time:</span> <strong>{formatReservationTimeOnly(selectedSlotReservation.reserved_for_datetime || selectedParkingSlot.reservedFor)}</strong></div>
                                     </>
                                 ) : (
                                     <>
                                         <div style={{ width: '100%', textAlign: 'left' }}><span style={{ color: '#64748b' }}>Assigned Sticker ID:</span> <strong>{selectedParkingSlot.stickerId || '---'}</strong></div>
-                                        <div style={{ width: '100%', textAlign: 'left' }}><span style={{ color: '#64748b' }}>Reserved For:</span> <strong>{formatDateTime(selectedParkingSlot.reservedFor)}</strong></div>
-                                        <div style={{ width: '100%', textAlign: 'left' }}><span style={{ color: '#64748b' }}>Reserved Sticker:</span> <strong>{selectedParkingSlot.reservedStickerId || '---'}</strong></div>
+                                        <div style={{ width: '100%', textAlign: 'left' }}><span style={{ color: '#64748b' }}>Reserved For:</span> <strong>{formatDateTime(selectedSlotReservation?.reserved_for_datetime || selectedParkingSlot.reservedFor)}</strong></div>
+                                        <div style={{ width: '100%', textAlign: 'left' }}><span style={{ color: '#64748b' }}>Reserved Sticker:</span> <strong>{selectedSlotReservation?.sticker_id || selectedParkingSlot.reservedStickerId || '---'}</strong></div>
                                     </>
                                 )}
 

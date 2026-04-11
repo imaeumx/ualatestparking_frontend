@@ -608,11 +608,6 @@ export default function UserDashboard() {
                     return;
                 }
 
-                if (!passwordRule.test(oldPassword)) {
-                    showError('Old password must be at least 8 characters with at least one uppercase letter and one number.');
-                    return;
-                }
-
                 if (!passwordRule.test(newPassword)) {
                     showError('New password must be at least 8 characters with at least one uppercase letter and one number.');
                     return;

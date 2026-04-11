@@ -29,6 +29,34 @@ import ualogo from '../assets/ualogo.png';
 export default function AdminPanel() {
     const navigate = useNavigate();
     const { showError, showInfo } = usePopup();
+
+    // Proper logout function: clears session and navigates to login screen
+    const handleLogout = () => {
+        localStorage.removeItem('currentUser');
+        localStorage.removeItem('validParkingStickers');
+        // Optionally clear other session/localStorage items if needed
+        // Redirect to login screen ("/" route is Login)
+        navigate('/');
+    };
+
+    // Normalize reservation.reserved_spots to integer slot IDs array.
+    // Supports backend sending either JSON array or JSON-stringified array.
+    const parseReservationSpots = useCallback((reservation) => {
+        if (!reservation) return [];
+        const rawSpots = Array.isArray(reservation.reserved_spots)
+            ? reservation.reserved_spots
+            : (() => {
+                try {
+                    return JSON.parse(reservation.reserved_spots || '[]');
+                } catch {
+                    return [];
+                }
+            })();
+
+        return rawSpots
+            .map((spotId) => parseInt(spotId, 10))
+            .filter((spotId) => !Number.isNaN(spotId));
+    }, []);
     const TOTAL_PARKING_SLOTS = 180;
 
     // Session user loaded from localStorage (set at login time).
@@ -104,6 +132,83 @@ export default function AdminPanel() {
     const [personnelRole, setPersonnelRole] = useState('admin');
     // Per-user localStorage key so each personnel account keeps independent read state.
     const personnelNotifReadStorageKey = `personnelNotifRead_${currentUser.username || 'personnel'}`;
+
+
+
+    // --- Move parseReservationSpots above all its usages to avoid ReferenceError ---
+
+    // Normalize reservation.reserved_spots to integer slot IDs array.
+    // Supports backend sending either JSON array or JSON-stringified array.
+    // Note: parkingSlots and pendingReservations are intentionally excluded from dependencies
+    // to prevent infinite render loop caused by setParkingSlots updates. These values are
+    // only read from current state, not used for function identity/memoization.
+    /* eslint-disable react-hooks/exhaustive-deps */
+    const syncApprovedReservationsToSlots = useCallback(() => {
+        if (parkingSlots.length === 0) return;
+
+        const approvedReservations = pendingReservations.filter(
+            (reservation) => (reservation.status || '').toLowerCase() === 'approved'
+        );
+        const updatesBySlot = new Map();
+
+        const getReservationPriority = (reservedAtIso) => {
+            const reservedAt = new Date(reservedAtIso);
+            if (Number.isNaN(reservedAt.getTime())) {
+                return { rank: -1, timeValue: 0 };
+            }
+
+            const graceEnd = new Date(reservedAt.getTime() + 30 * 60 * 1000);
+            if (new Date() > graceEnd) {
+                return { rank: 3, timeValue: reservedAt.getTime() };
+            }
+            if (new Date() >= reservedAt) {
+                return { rank: 2, timeValue: reservedAt.getTime() };
+            }
+            return { rank: 1, timeValue: -reservedAt.getTime() };
+        };
+
+        approvedReservations.forEach((reservation) => {
+            const reservedSticker = (reservation.sticker_id || '').trim().toUpperCase();
+            const reservedFor = reservation.reserved_for_datetime || null;
+            const nextPriority = getReservationPriority(reservedFor);
+            const normalizedSpots = parseReservationSpots(reservation);
+
+            normalizedSpots.forEach((spotId) => {
+                const current = updatesBySlot.get(spotId);
+                const shouldReplace = !current
+                    || nextPriority.rank > current.priority.rank
+                    || (nextPriority.rank === current.priority.rank && nextPriority.timeValue > current.priority.timeValue);
+                if (shouldReplace) {
+                    updatesBySlot.set(spotId, {
+                        reservedFor,
+                        reservedStickerId: reservedSticker,
+                        priority: nextPriority
+                    });
+                }
+            });
+        });
+
+        const updatedSlots = parkingSlots.map((slot) => {
+            const update = updatesBySlot.get(slot.id);
+            if (!update) {
+                // Clear reservation marker if not reserved this round
+                if (slot.reservedFor || slot.reservedStickerId) {
+                    return { ...slot, reservedFor: null, reservedStickerId: '' };
+                }
+                return slot;
+            }
+            if (slot.status === 'occupied') return slot;
+            return {
+                ...slot,
+                reservedFor: update.reservedFor,
+                reservedStickerId: update.reservedStickerId
+            };
+        });
+
+        setParkingSlots(updatedSlots);
+        localStorage.setItem('parkingSlots', JSON.stringify(updatedSlots));
+    }, [parseReservationSpots]);
+    /* eslint-enable react-hooks/exhaustive-deps */
 
     useEffect(() => {
         // Restore read-notification keys from localStorage on mount/user change.
@@ -252,22 +357,6 @@ export default function AdminPanel() {
 
     // Normalize reservation.reserved_spots to integer slot IDs array.
     // Supports backend sending either JSON array or JSON-stringified array.
-    const parseReservationSpots = (reservation) => {
-        if (!reservation) return [];
-        const rawSpots = Array.isArray(reservation.reserved_spots)
-            ? reservation.reserved_spots
-            : (() => {
-                try {
-                    return JSON.parse(reservation.reserved_spots || '[]');
-                } catch {
-                    return [];
-                }
-            })();
-
-        return rawSpots
-            .map((spotId) => parseInt(spotId, 10))
-            .filter((spotId) => !Number.isNaN(spotId));
-    };
 
     // Break the stored reservation reason into labeled fields so the popup can
     // present it as a proper form-style layout.
@@ -365,81 +454,6 @@ export default function AdminPanel() {
         localStorage.setItem('parkingSlots', JSON.stringify(updatedSlots));
     };
 
-    const syncApprovedReservationsToSlots = useCallback(() => {
-        if (parkingSlots.length === 0) return;
-
-        const approvedReservations = pendingReservations.filter(
-            (reservation) => (reservation.status || '').toLowerCase() === 'approved'
-        );
-        const updatesBySlot = new Map();
-
-        const getReservationPriority = (reservedAtIso) => {
-            const reservedAt = new Date(reservedAtIso);
-            if (Number.isNaN(reservedAt.getTime())) {
-                return { rank: -1, timeValue: 0 };
-            }
-
-            const graceEnd = new Date(reservedAt.getTime() + 30 * 60 * 1000);
-            if (new Date() > graceEnd) {
-                return { rank: 3, timeValue: reservedAt.getTime() };
-            }
-            if (new Date() >= reservedAt) {
-                return { rank: 2, timeValue: reservedAt.getTime() };
-            }
-            return { rank: 1, timeValue: -reservedAt.getTime() };
-        };
-
-        approvedReservations.forEach((reservation) => {
-            const reservedSticker = (reservation.sticker_id || '').trim().toUpperCase();
-            const reservedFor = reservation.reserved_for_datetime || null;
-            const nextPriority = getReservationPriority(reservedFor);
-            const normalizedSpots = parseReservationSpots(reservation);
-
-            normalizedSpots.forEach((spotId) => {
-                const current = updatesBySlot.get(spotId);
-                const shouldReplace = !current
-                    || nextPriority.rank > current.priority.rank
-                    || (nextPriority.rank === current.priority.rank && nextPriority.timeValue > current.priority.timeValue);
-                if (!shouldReplace) return;
-                updatesBySlot.set(spotId, {
-                    reservedFor,
-                    reservedStickerId: reservedSticker,
-                    priority: nextPriority
-                });
-            });
-        });
-
-        let changed = false;
-        const syncedSlots = parkingSlots.map((slot) => {
-            if (slot.status === 'occupied') return slot;
-            const update = updatesBySlot.get(slot.id);
-            if (update) {
-                if (slot.reservedFor !== update.reservedFor || slot.reservedStickerId !== update.reservedStickerId) {
-                    changed = true;
-                    return {
-                        ...slot,
-                        reservedFor: update.reservedFor,
-                        reservedStickerId: update.reservedStickerId
-                    };
-                }
-                return slot;
-            }
-            if (slot.reservedFor || slot.reservedStickerId) {
-                changed = true;
-                return {
-                    ...slot,
-                    reservedFor: null,
-                    reservedStickerId: ''
-                };
-            }
-            return slot;
-        });
-
-        if (changed) {
-            setParkingSlots(syncedSlots);
-            localStorage.setItem('parkingSlots', JSON.stringify(syncedSlots));
-        }
-    }, [parkingSlots, pendingReservations]);
 
     // Start inline edit mode for one reservation row.
     const beginReservationEdit = (reservation) => {
@@ -1289,7 +1303,7 @@ export default function AdminPanel() {
                             </div>
                         )}
 
-                        <button className="btn-blue slim" onClick={() => navigate('/')}>
+                        <button className="btn-blue slim" onClick={handleLogout}>
                             Logout
                         </button>
                     </div>

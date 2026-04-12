@@ -387,12 +387,13 @@ export default function UserDashboard() {
         return lines.join('\n');
     };
 
-    // Get unread notifications (application updates + reservation status updates)
-    const applicationNotifications = records.filter(r => r.is_seen === false);
+    // Get notifications (application updates + reservation status updates)
+    const applicationNotifications = records.slice();
+    const unreadApplicationNotifications = records.filter(r => r.is_seen === false);
     const unreadReservationStatusNotifs = reservationStatusNotifs.filter(
         (notif) => !readReservationNotifKeys.includes(notif.key)
     );
-    const unreadNotificationCount = applicationNotifications.length + unreadReservationStatusNotifs.length;
+    const unreadNotificationCount = unreadApplicationNotifications.length + unreadReservationStatusNotifs.length;
 
     useEffect(() => {
         if (!user?.username || parkingSlots.length === 0) return;
@@ -593,8 +594,6 @@ export default function UserDashboard() {
             setReadReservationNotifKeys(mergedReadKeys);
             localStorage.setItem(readStorageKey, JSON.stringify(mergedReadKeys));
         }
-
-        setShowNotif(false);
     };
 
     // 3. Update Profile Logic
@@ -728,18 +727,39 @@ export default function UserDashboard() {
                         {showNotif && (
                             <div className="notif-dropdown">
                                 <h4>Recent Updates</h4>
-                                {unreadNotificationCount === 0 ? (
+                                {applicationNotifications.length === 0 && unreadReservationStatusNotifs.length === 0 ? (
                                     <p className="empty-notif">No new notifications.</p>
                                 ) : (
                                     <>
                                         {applicationNotifications.slice().reverse().map((n, i) => (
-                                            <div key={`app-${i}`} className="notif-item">
+                                            <div
+                                                key={`app-${i}`}
+                                                className={`notif-item ${n.is_seen ? 'is-read' : 'is-unread'}`}
+                                                role="button"
+                                                tabIndex={0}
+                                                onClick={markAsRead}
+                                                onKeyDown={(event) => event.key === 'Enter' && markAsRead()}
+                                                title="Click to mark as read"
+                                            >
                                                 Vehicle <strong>{decryptData(n.plate_number)}</strong> has been
                                                 <strong className={n.status === 'Approved' ? 'text-green' : 'text-red'}> {n.status}</strong>.
+                                                {n.admin_notes && (
+                                                    <div style={{ marginTop: '4px', fontSize: '12px', color: '#475569' }}>
+                                                        Note: {n.admin_notes}
+                                                    </div>
+                                                )}
                                             </div>
                                         ))}
                                         {unreadReservationStatusNotifs.map((notif) => (
-                                            <div key={notif.key} className="notif-item">
+                                            <div
+                                                key={notif.key}
+                                                className="notif-item is-unread"
+                                                role="button"
+                                                tabIndex={0}
+                                                onClick={markAsRead}
+                                                onKeyDown={(event) => event.key === 'Enter' && markAsRead()}
+                                                title="Click to mark as read"
+                                            >
                                                 Reservation <strong>#{notif.reservationId}</strong> changed from
                                                 <strong style={{ color: '#b45309' }}> {notif.previousStatus || 'pending'}</strong> to
                                                 <strong style={{ color: notif.nextStatus === 'approved' ? '#16a34a' : notif.nextStatus === 'denied' ? '#dc2626' : '#0f766e' }}> {notif.nextStatus}</strong>.

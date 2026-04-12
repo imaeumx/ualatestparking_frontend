@@ -4,7 +4,7 @@ import axios from 'axios';
 import ParkingReservationPanel from './ParkingReservationPanel';
 import ReservationModal from './ReservationModal';
 import StickerManagement from './StickerManagement';
-import { encryptDESStable } from '../utils/desCrypto';
+import { encryptDES } from '../utils/desCrypto';
 import API_BASE_URL from '../config/api';
 
 /**
@@ -136,7 +136,7 @@ export default function ParkingManagement({
         }
 
         try {
-            return encryptDESStable(username);
+            return encryptDES(username);
         } catch {
             return '***';
         }

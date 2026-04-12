@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { usePopup } from '../components/PopupContext';
 import PasswordField from '../components/PasswordField';
-import { decryptDES } from '../utils/desCrypto';
+import { decryptDES, isSystemDESKey } from '../utils/desCrypto';
 import API_BASE_URL from '../config/api';
 import ualogo from '../assets/ualogo.png';
 
@@ -67,6 +67,14 @@ export default function AdminPanel() {
     const isRootAdmin = normalizedRole === 'root_admin';
     const isAdmin = normalizedRole === 'admin' || isRootAdmin;
     const isGuard = normalizedRole === 'guard';
+    const defaultActiveTab = isGuard ? 'parking' : 'applications';
+    const activeTabStorageKey = `adminPanelActiveTab_${currentUser.username || 'personnel'}`;
+    const allowedTabs = useMemo(() => {
+        const tabs = ['parking', 'verify'];
+        if (isAdmin) tabs.unshift('applications', 'reservations', 'logs');
+        if (isRootAdmin) tabs.push('accounts');
+        return tabs;
+    }, [isAdmin, isRootAdmin]);
 
     // Application management state
     // records: all sticker applications visible to personnel.
@@ -76,18 +84,19 @@ export default function AdminPanel() {
 
     // Sticker verification state
     // verifyInput/activeVerify: lookup a specific sticker ID in applications list.
-    // verifySecretKeyInput/hasValidVerifyKey/activeDESKey: role-based DES key input and unlock state for decryption.
+    // verifySecretKeyInput/hasValidVerifyKey: role-based DES key input and unlock state for decryption.
     const [verifyInput, setVerifyInput] = useState('');
     const [activeVerify, setActiveVerify] = useState('');
     const [verifySecretKeyInput, setVerifySecretKeyInput] = useState('');
     const [hasValidVerifyKey, setHasValidVerifyKey] = useState(false);
-    // activeDESKey: stores the user-provided DES key for decryption if unlocked
-    const [activeDESKey, setActiveDESKey] = useState('');
     const VERIFY_KEY_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 
     // UI state
     // activeTab chooses which major section is rendered.
-    const [activeTab, setActiveTab] = useState('applications');
+    const [activeTab, setActiveTab] = useState(() => {
+        const savedTab = localStorage.getItem(activeTabStorageKey);
+        return savedTab && allowedTabs.includes(savedTab) ? savedTab : defaultActiveTab;
+    });
     const [applicationMiniTab, setApplicationMiniTab] = useState('pending');
 
     // Parking management state
@@ -306,11 +315,11 @@ export default function AdminPanel() {
     };
 
     // Local alias used by existing table/render code.
-    // Use the activeDESKey if unlocked, otherwise default
+    // Non-root personnel can decrypt only after valid key-unlock gate is satisfied.
     const decryptData = (ciphertext) => {
-        if (isRootAdmin) return decryptDES(ciphertext); // root admin uses default key
-        if (hasValidVerifyKey && activeDESKey) {
-            return decryptDES(ciphertext, activeDESKey);
+        if (isRootAdmin) return decryptDES(ciphertext);
+        if (hasValidVerifyKey) {
+            return decryptDES(ciphertext);
         }
         return ciphertext;
     };
@@ -532,10 +541,15 @@ export default function AdminPanel() {
         const savedLogs = JSON.parse(localStorage.getItem('parkingLogs') || '[]');
         setParkingLogs(Array.isArray(savedLogs) ? savedLogs : []);
 
-        if (isGuard) {
-            setActiveTab('parking');
-        }
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => {
+        if (!allowedTabs.includes(activeTab)) {
+            setActiveTab(defaultActiveTab);
+            return;
+        }
+        localStorage.setItem(activeTabStorageKey, activeTab);
+    }, [activeTab, activeTabStorageKey, allowedTabs, defaultActiveTab]);
 
     useEffect(() => {
         // Minute ticker used to recompute overdue/escalation time-based UI.
@@ -652,17 +666,20 @@ export default function AdminPanel() {
     const clearVerify = () => { setVerifyInput(''); setActiveVerify(''); };
 
     const handleVerifySecretKey = () => {
-        // Accept any non-empty key for unlock, store it for decryption
         const key = (verifySecretKeyInput || '').trim();
-        if (key.length >= 8) { // DES keys are 8 bytes (min practical length)
-            setHasValidVerifyKey(true);
-            setActiveDESKey(key);
-            showInfo('Valid secret key. Decrypted verify view enabled.');
-        } else {
-            setHasValidVerifyKey(false);
-            setActiveDESKey('');
-            showError('Invalid secret key. Key must be at least 8 characters.');
+        if (!key) {
+            showError('Enter the secret key first.');
+            return;
         }
+
+        if (!isSystemDESKey(key)) {
+            setHasValidVerifyKey(false);
+            showError('Invalid secret key.');
+            return;
+        }
+
+        setHasValidVerifyKey(true);
+        showInfo('Valid secret key. Decrypted verify view enabled.');
     };
 
     // Enter key handler for sticker verify field.
@@ -1038,6 +1055,26 @@ export default function AdminPanel() {
         localStorage.setItem(personnelNotifReadStorageKey, JSON.stringify(allKeys));
     };
 
+    const handlePersonnelNotifClick = (notif) => {
+        if (!readPersonnelNotifKeys.includes(notif.key)) {
+            const updatedRead = [...readPersonnelNotifKeys, notif.key];
+            setReadPersonnelNotifKeys(updatedRead);
+            localStorage.setItem(personnelNotifReadStorageKey, JSON.stringify(updatedRead));
+        }
+
+        const slotId = Number(notif.slotId || 0);
+        if (!Number.isNaN(slotId) && slotId > 0) {
+            const targetArea = parkingAreas.find((area) => slotId >= area.startId && slotId <= area.endId);
+            if (targetArea) {
+                setSelectedParkingAreaName(targetArea.name);
+                setSelectedParkingSlotId(slotId);
+                setActiveTab('parking');
+            }
+        }
+
+        setShowPersonnelNotif(false);
+    };
+
     /**
      * Handle parking vehicle from table slot button.
      */
@@ -1295,15 +1332,7 @@ export default function AdminPanel() {
                         </button>
 
                         {showPersonnelNotif && (
-                            <div
-                                className="notif-dropdown"
-                                style={{
-                                    minWidth: '320px',
-                                    ...(personnelNotifItems.length >= 5
-                                        ? { maxHeight: '320px', overflowY: 'auto' }
-                                        : {})
-                                }}
-                            >
+                            <div className="notif-dropdown">
                                 <h4>Notifications</h4>
                                 {personnelNotifItems.length === 0 ? (
                                     <p className="empty-notif">No new notifications.</p>
@@ -1311,13 +1340,13 @@ export default function AdminPanel() {
                                     personnelNotifItems.map((notif) => (
                                         <div
                                             key={notif.key}
-                                            className="notif-item"
-                                            onClick={() => {
-                                                // Mark this notification as read when clicked
-                                                if (!readPersonnelNotifKeys.includes(notif.key)) {
-                                                    const updatedRead = [...readPersonnelNotifKeys, notif.key];
-                                                    setReadPersonnelNotifKeys(updatedRead);
-                                                    localStorage.setItem(personnelNotifReadStorageKey, JSON.stringify(updatedRead));
+                                            className={`notif-item ${readPersonnelNotifKeys.includes(notif.key) ? 'is-read' : 'is-unread'}`}
+                                            role="button"
+                                            tabIndex={0}
+                                            onClick={() => handlePersonnelNotifClick(notif)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === 'Enter') {
+                                                    handlePersonnelNotifClick(notif);
                                                 }
                                             }}
                                             style={{ cursor: 'pointer' }}
@@ -1841,6 +1870,7 @@ export default function AdminPanel() {
                                 </button>
                             </div>
                         )}
+
                     </div>
 
                     <div style={{ marginTop: '16px', textAlign: 'left', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px', background: '#f8fafc' }}>
@@ -1886,6 +1916,7 @@ export default function AdminPanel() {
                             })()}
                         </div>
                     )}
+
                 </div>
 
                 </>)}

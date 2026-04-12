@@ -1,14 +1,31 @@
 /* --- 1. CORE DEFAULTS --- */
 * {
     box-sizing: border-box;
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 #f8fafc;
+}
+
+*::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+    background: #f8fafc;
+}
+
+*::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, #e2e8f0, #cbd5e1);
+    border-radius: 999px;
+    border: 2px solid #f8fafc;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, #cbd5e1, #94a3b8);
 }
 
 body {
     font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-.reservation-modal-scroll {
-    scrollbar-width: thin;
-    scrollbar-color: #cbd5e1 transparent;
-}
     background: linear-gradient(180deg, #eef2ff 0%, #f8fafc 42%, #f5f6f8 100%);
     color: #1f2937;
     margin: 0;
@@ -433,13 +450,19 @@ button:hover {
     position: absolute;
     top: 48px;
     right: 0;
-    width: 280px;
+    width: 320px;
+    max-width: calc(100vw - 24px);
     z-index: 100;
     background: white;
     box-shadow: 0 10px 25px rgba(0,0,0,0.1);
     border: 1px solid #e2e8f0;
     padding: 15px;
     border-radius: 12px;
+    max-height: 280px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 #f8fafc;
 }
 
 .notif-item {
@@ -449,6 +472,25 @@ button:hover {
     background-color: #f8fafc;
     border-radius: 6px;
     border-left: 4px solid #6366f1;
+    cursor: pointer;
+    white-space: normal;
+    word-break: break-word;
+}
+
+.notif-item.is-read {
+    opacity: 0.78;
+    border-left-color: #94a3b8;
+}
+
+.notif-read-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    color: #475569;
+    font-size: 0.65rem;
+    font-weight: 700;
 }
 
 /* --- 7. TABLES --- */
@@ -605,8 +647,6 @@ button:hover {
     button div:first-child { font-size: 1.3rem !important; }
     button div:nth-child(2) { font-size: 0.75rem !important; }
     
-    /* Hide scrollbars elsewhere but not on parking grid */
-    ::-webkit-scrollbar { width: 0 !important; }
 }
 
 /* ==========================================

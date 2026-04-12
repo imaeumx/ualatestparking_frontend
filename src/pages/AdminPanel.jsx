@@ -89,6 +89,7 @@ export default function AdminPanel() {
     const [activeVerify, setActiveVerify] = useState('');
     const [verifySecretKeyInput, setVerifySecretKeyInput] = useState('');
     const [hasValidVerifyKey, setHasValidVerifyKey] = useState(false);
+    const [showVerifySecretKeyModal, setShowVerifySecretKeyModal] = useState(false);
     const VERIFY_KEY_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 
     // UI state
@@ -319,9 +320,43 @@ export default function AdminPanel() {
     const decryptData = (ciphertext) => {
         if (isRootAdmin) return decryptDES(ciphertext);
         if (hasValidVerifyKey) {
-            return decryptDES(ciphertext);
+            return decryptDES(ciphertext, (verifySecretKeyInput || '').trim());
         }
         return ciphertext;
+    };
+
+    const canDecryptAnyRecordWithKey = (candidateKey) => {
+        const normalizedKey = (candidateKey || '').trim();
+        if (!normalizedKey) return false;
+
+        const encryptedCandidates = records.flatMap((record) => [record?.plate_number, record?.owner_name])
+            .map((value) => (value == null ? '' : String(value).trim()))
+            .filter((value) => value.length > 0);
+
+        return encryptedCandidates.some((cipherValue) => {
+            const decryptedValue = decryptDES(cipherValue, normalizedKey);
+            return !!decryptedValue && decryptedValue !== cipherValue;
+        });
+    };
+
+    const canDecryptRecordWithKey = (record, candidateKey) => {
+        const normalizedKey = (candidateKey || '').trim();
+        if (!record || !normalizedKey) return false;
+
+        const encryptedCandidates = [record?.plate_number, record?.owner_name]
+            .map((value) => (value == null ? '' : String(value).trim()))
+            .filter((value) => value.length > 0);
+
+        return encryptedCandidates.some((cipherValue) => {
+            const decryptedValue = decryptDES(cipherValue, normalizedKey);
+            return !!decryptedValue && decryptedValue !== cipherValue;
+        });
+    };
+
+    const getVerifyRecordBySticker = (stickerId) => {
+        const normalizedStickerId = (stickerId || '').trim().toUpperCase();
+        if (!normalizedStickerId) return null;
+        return records.find((record) => (record.sticker_id || '').toUpperCase() === normalizedStickerId) || null;
     };
 
     /**
@@ -544,6 +579,21 @@ export default function AdminPanel() {
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
+        const syncParkingLogsFromStorage = () => {
+            const savedLogs = JSON.parse(localStorage.getItem('parkingLogs') || '[]');
+            setParkingLogs(Array.isArray(savedLogs) ? savedLogs : []);
+        };
+
+        const handleStorage = (event) => {
+            if (event.key && event.key !== 'parkingLogs') return;
+            syncParkingLogsFromStorage();
+        };
+
+        window.addEventListener('storage', handleStorage);
+        return () => window.removeEventListener('storage', handleStorage);
+    }, []);
+
+    useEffect(() => {
         if (!allowedTabs.includes(activeTab)) {
             setActiveTab(defaultActiveTab);
             return;
@@ -662,23 +712,67 @@ export default function AdminPanel() {
     };
 
     // Sticker verification handlers
-    const handleVerify = () => { setActiveVerify(verifyInput.trim().toUpperCase()); };
-    const clearVerify = () => { setVerifyInput(''); setActiveVerify(''); };
+    const handleVerify = () => {
+        const normalizedStickerId = verifyInput.trim().toUpperCase();
+        if (!normalizedStickerId) {
+            showError('Please enter sticker ID first.');
+            return;
+        }
 
-    const handleVerifySecretKey = () => {
+        setActiveVerify(normalizedStickerId);
+        if (!isRootAdmin && !hasValidVerifyKey) {
+            setShowVerifySecretKeyModal(true);
+        }
+    };
+
+    const clearVerify = () => {
+        setVerifyInput('');
+        setActiveVerify('');
+        setShowVerifySecretKeyModal(false);
+    };
+
+    const handleVerifySecretKey = async () => {
         const key = (verifySecretKeyInput || '').trim();
         if (!key) {
             showError('Enter the secret key first.');
             return;
         }
 
-        if (!isSystemDESKey(key)) {
+        let matchesSystemKey = isSystemDESKey(key);
+        if (!matchesSystemKey) {
+            try {
+                const response = await axios.get(`${API_BASE_URL}/des-key/`);
+                const backendKey = (response?.data?.des_key || '').trim();
+                matchesSystemKey = !!backendKey && backendKey === key;
+            } catch {
+                // Ignore network/bootstrap errors and continue with local checks.
+            }
+        }
+
+        // If key matches configured system key, unlock immediately.
+        if (matchesSystemKey) {
+            setHasValidVerifyKey(true);
+            setShowVerifySecretKeyModal(false);
+            showInfo('Valid secret key. Decrypted verify view enabled.');
+            return;
+        }
+
+        const activeRecord = getVerifyRecordBySticker(activeVerify);
+        if (activeRecord && !canDecryptRecordWithKey(activeRecord, key)) {
+            setHasValidVerifyKey(false);
+            showError('Secret key does not match this sticker record.');
+            return;
+        }
+
+        const canDecryptRecords = canDecryptAnyRecordWithKey(key);
+        if (!canDecryptRecords) {
             setHasValidVerifyKey(false);
             showError('Invalid secret key.');
             return;
         }
 
         setHasValidVerifyKey(true);
+        setShowVerifySecretKeyModal(false);
         showInfo('Valid secret key. Decrypted verify view enabled.');
     };
 
@@ -686,6 +780,12 @@ export default function AdminPanel() {
     const handleVerifyKeyPress = (e) => {
         if (e.key === 'Enter') {
             handleVerify();
+        }
+    };
+
+    const handleVerifySecretKeyModalKeyPress = (e) => {
+        if (e.key === 'Enter') {
+            handleVerifySecretKey();
         }
     };
 
@@ -1496,7 +1596,10 @@ export default function AdminPanel() {
                                             <>
                                                 <PasswordField
                                                     value={verifySecretKeyInput}
-                                                    onChange={(e) => setVerifySecretKeyInput(e.target.value)}
+                                                    onChange={(e) => {
+                                                        setVerifySecretKeyInput(e.target.value);
+                                                        setHasValidVerifyKey(false);
+                                                    }}
                                                     placeholder="Enter Secret Key"
                                                     wrapperStyle={{ maxWidth: '180px', flex: '0 0 180px' }}
                                                     inputStyle={{ width: '100%' }}
@@ -1856,21 +1959,6 @@ export default function AdminPanel() {
                                 </button>
                             )}
                         </div>
-                        {!isRootAdmin && (
-                            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', alignItems: 'center', marginTop: '10px', flexWrap: 'wrap' }}>
-                                <PasswordField
-                                    value={verifySecretKeyInput}
-                                    onChange={(e) => setVerifySecretKeyInput(e.target.value)}
-                                    placeholder="Enter Secret Key"
-                                    wrapperStyle={{ width: '360px', maxWidth: '360px' }}
-                                    inputStyle={{ textAlign: 'left', fontSize: '14px', padding: '10px 12px', width: '100%', height: '36px' }}
-                                />
-                                <button className="btn-gray slim" onClick={handleVerifySecretKey} style={{ marginTop: 0, height: '36px', minWidth: '110px', fontSize: '12px', padding: '4px 10px' }}>
-                                    Unlock
-                                </button>
-                            </div>
-                        )}
-
                     </div>
 
                     <div style={{ marginTop: '16px', textAlign: 'left', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px', background: '#f8fafc' }}>
@@ -1889,6 +1977,24 @@ export default function AdminPanel() {
                     {activeVerify && (
                         <div style={{ marginTop: '18px', textAlign: 'left' }}>
                             {(() => {
+                                if (!isRootAdmin && !hasValidVerifyKey) {
+                                    return (
+                                        <div style={{ border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px', background: '#f8fafc' }}>
+                                            <p style={{ margin: 0, color: '#334155', fontWeight: 600 }}>
+                                                Secret key is required before showing sticker details.
+                                            </p>
+                                            <button
+                                                type="button"
+                                                className="btn-blue slim"
+                                                onClick={() => setShowVerifySecretKeyModal(true)}
+                                                style={{ marginTop: '10px', minWidth: '140px' }}
+                                            >
+                                                Enter Secret Key
+                                            </button>
+                                        </div>
+                                    );
+                                }
+
                                 const record = records.find(r => (r.sticker_id || '').toUpperCase() === activeVerify);
                                 if (!record) {
                                     return <p style={{ color: '#b91c1c', fontWeight: 700 }}>No record found for {activeVerify}.</p>;
@@ -1899,21 +2005,81 @@ export default function AdminPanel() {
                                 const verificationStatusLabel = record.status === 'Pending'
                                     ? 'Pending ⏳'
                                     : (record.status === 'Approved' && (validSemester || isCurrentSemesterBucketMatch) ? 'Active ✅' : 'Expired ❌');
+                                const resolvedPlate = decryptData(record.plate_number);
+                                const resolvedOwner = decryptData(record.owner_name);
                                 return (
                                     <div style={{ border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px', background: '#f8fafc' }}>
                                         <div><strong>Sticker:</strong> {record.sticker_id}</div>
                                         <div><strong>Status:</strong> {verificationStatusLabel}</div>
                                         <div><strong>Validity Period:</strong> {validityPeriodLabel}</div>
-                                        <div><strong>Plate:</strong> {canViewVerifyDecrypted ? decryptData(record.plate_number) : (record.plate_number || '---')}</div>
-                                        <div><strong>Owner:</strong> {canViewVerifyDecrypted ? decryptData(record.owner_name) : (record.owner_name || '---')}</div>
-                                        {!canViewVerifyDecrypted && (
-                                            <div style={{ marginTop: '8px', color: '#b45309', fontSize: '12px', fontWeight: 700 }}>
-                                                Data is DES encrypted. Enter a valid secret key to decrypt.
-                                            </div>
-                                        )}
+                                        <div><strong>Plate:</strong> {resolvedPlate}</div>
+                                        <div><strong>Owner:</strong> {resolvedOwner}</div>
                                     </div>
                                 );
                             })()}
+                        </div>
+                    )}
+
+                    {showVerifySecretKeyModal && !isRootAdmin && (
+                        <div
+                            style={{
+                                position: 'fixed',
+                                inset: 0,
+                                zIndex: 1200,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                background: 'rgba(15, 23, 42, 0.55)',
+                                padding: '16px'
+                            }}
+                            onClick={() => setShowVerifySecretKeyModal(false)}
+                        >
+                            <div
+                                style={{
+                                    width: '100%',
+                                    maxWidth: '460px',
+                                    background: '#ffffff',
+                                    borderRadius: '14px',
+                                    boxShadow: '0 18px 42px rgba(15, 23, 42, 0.24)',
+                                    border: '1px solid #e2e8f0',
+                                    padding: '20px'
+                                }}
+                                onClick={(event) => event.stopPropagation()}
+                            >
+                                <h4 style={{ margin: '0 0 10px', color: '#0f172a' }}>Enter Secret Key</h4>
+                                <p style={{ margin: '0 0 12px', color: '#475569', fontSize: '13px' }}>
+                                    Enter your secret key to decrypt and view sticker details.
+                                </p>
+                                <PasswordField
+                                    value={verifySecretKeyInput}
+                                    onChange={(e) => {
+                                        setVerifySecretKeyInput(e.target.value);
+                                        setHasValidVerifyKey(false);
+                                    }}
+                                    onKeyDown={handleVerifySecretKeyModalKeyPress}
+                                    placeholder="Enter Secret Key"
+                                    wrapperStyle={{ width: '100%' }}
+                                    inputStyle={{ textAlign: 'left', fontSize: '14px', padding: '10px 12px', width: '100%', height: '38px' }}
+                                />
+                                <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                                    <button
+                                        type="button"
+                                        className="btn-gray slim"
+                                        onClick={() => setShowVerifySecretKeyModal(false)}
+                                        style={{ marginTop: 0, minWidth: '88px' }}
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="btn-blue slim"
+                                        onClick={handleVerifySecretKey}
+                                        style={{ marginTop: 0, minWidth: '96px' }}
+                                    >
+                                        Unlock
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     )}
 

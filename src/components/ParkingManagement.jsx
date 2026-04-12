@@ -349,6 +349,30 @@ export default function ParkingManagement({
         return !!reservationInfo && (reservationInfo.isActive || reservationInfo.isOverdue) && reservedSticker === 'N/A';
     };
 
+    const addUserParkingLog = (eventType, slot, notes = '') => {
+        if (!slot || !slot.id) return;
+
+        const firstName = (user?.firstName || user?.first_name || '').trim();
+        const lastName = (user?.lastName || user?.last_name || '').trim();
+        const actorName = `${firstName} ${lastName}`.trim() || user?.username || 'user';
+        const existingLogsRaw = JSON.parse(localStorage.getItem('parkingLogs') || '[]');
+        const existingLogs = Array.isArray(existingLogsRaw) ? existingLogsRaw : [];
+
+        const nextLog = {
+            id: `${Date.now()}-${slot.id}-${eventType}`,
+            timestamp: new Date().toISOString(),
+            eventType,
+            slotId: slot.id,
+            plateNumber: slot.plateNumber || '',
+            stickerId: slot.stickerId || '',
+            actor: actorName,
+            notes
+        };
+
+        const updatedLogs = [nextLog, ...existingLogs].slice(0, 300);
+        localStorage.setItem('parkingLogs', JSON.stringify(updatedLogs));
+    };
+
     // Core parking write operation:
     // 1) validate sticker
     // 2) validate reservation conflict
@@ -392,6 +416,10 @@ export default function ParkingManagement({
         );
         setParkingSlots(updatedSlots);
         localStorage.setItem('parkingSlots', JSON.stringify(updatedSlots));
+        const occupiedSlot = updatedSlots.find((slot) => slot.id === slotId);
+        if (occupiedSlot) {
+            addUserParkingLog('park', occupiedSlot, 'Parked by user self-service action.');
+        }
         showSuccess(`Vehicle ${plateNumber} parked in slot ${slotId}`);
         return true;
     };
@@ -436,6 +464,10 @@ export default function ParkingManagement({
             );
             setParkingSlots(updatedSlots);
             localStorage.setItem('parkingSlots', JSON.stringify(updatedSlots));
+            const occupiedSlot = updatedSlots.find((slot) => slot.id === selectedSlot.id);
+            if (occupiedSlot) {
+                addUserParkingLog('park', occupiedSlot, 'Parked by user self-service action (guest/event reservation).');
+            }
             setParkStickerInput('');
             setParkPlateInput('');
             setShowParkForSelectedSpot(false);
@@ -496,6 +528,7 @@ export default function ParkingManagement({
         );
         setParkingSlots(updatedSlots);
         localStorage.setItem('parkingSlots', JSON.stringify(updatedSlots));
+        addUserParkingLog('release', slot, 'Checked out by user self-service action.');
         showInfo(`Vehicle ${slot.plateNumber} left slot ${slot.id} successfully.`);
     };
 

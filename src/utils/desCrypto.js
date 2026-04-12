@@ -120,28 +120,40 @@ export function encryptDESStable(plainText) {
  * - Decrypted text if successful
  * - Original cipherText if decryption fails (graceful degradation)
  */
-export function decryptDES(cipherText) {
+export function decryptDES(cipherText, overrideKey) {
     // Guard against null/undefined/empty inputs
     const normalizedValue = cipherText == null ? '' : String(cipherText);
-    if (!normalizedValue) return ''; // Empty input → empty output
+    if (!normalizedValue) return '';
+
+    // Use overrideKey if provided, else default
+    const keyToUse = overrideKey || DES_SECRET_KEY;
 
     try {
-        // Call CryptoJS library to decrypt
-        // Input: encrypted text, secret key (MUST match the encryption key)
-        // Output: decrypted bytes
-        const bytes = CryptoJS.DES.decrypt(normalizedValue, DES_SECRET_KEY);
-        
-        // Convert decrypted bytes back to readable UTF-8 string
-        // CryptoJS.enc.Utf8 specifies the character encoding (UTF-8 = standard text encoding)
+        const bytes = CryptoJS.DES.decrypt(normalizedValue, keyToUse);
         const decrypted = bytes.toString(CryptoJS.enc.Utf8);
-        
-        // Return decrypted value if non-empty, otherwise return original input
-        // (in case decryption produced empty string, treat as failure → return original)
         return decrypted || normalizedValue;
     } catch {
-        // Decryption failed (corrupted data, key mismatch, etc.)
-        // Return original value instead of crashing
-        // This prevents white-screen errors in table rendering
         return normalizedValue;
     }
+}
+
+/**
+ * FUNCTION: generateDESKey
+ *
+ * Generates a random 8-byte (64-bit) DES key and returns it as a base64 string.
+ * DES keys are 8 bytes (56 bits + 8 parity bits).
+ *
+ * USAGE:
+ *   Use this to generate a new DES key for testing or setup.
+ */
+export function generateDESKey() {
+    // Generate 8 random bytes
+    const randomWords = CryptoJS.lib.WordArray.random(8);
+    // Convert to base64 string
+    return CryptoJS.enc.Base64.stringify(randomWords);
+}
+
+// Show generated key only in development for local testing.
+if (import.meta.env.DEV) {
+    console.log('Generated DES Key (base64):', generateDESKey());
 }

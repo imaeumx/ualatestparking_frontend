@@ -76,11 +76,13 @@ export default function AdminPanel() {
 
     // Sticker verification state
     // verifyInput/activeVerify: lookup a specific sticker ID in applications list.
-    // verifySecretKeyInput/hasValidVerifyKey: optional decrypt gate for verify view.
+    // verifySecretKeyInput/hasValidVerifyKey/activeDESKey: role-based DES key input and unlock state for decryption.
     const [verifyInput, setVerifyInput] = useState('');
     const [activeVerify, setActiveVerify] = useState('');
     const [verifySecretKeyInput, setVerifySecretKeyInput] = useState('');
     const [hasValidVerifyKey, setHasValidVerifyKey] = useState(false);
+    // activeDESKey: stores the user-provided DES key for decryption if unlocked
+    const [activeDESKey, setActiveDESKey] = useState('');
     const VERIFY_KEY_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 
     // UI state
@@ -304,7 +306,14 @@ export default function AdminPanel() {
     };
 
     // Local alias used by existing table/render code.
-    const decryptData = (ciphertext) => decryptDES(ciphertext);
+    // Use the activeDESKey if unlocked, otherwise default
+    const decryptData = (ciphertext) => {
+        if (isRootAdmin) return decryptDES(ciphertext); // root admin uses default key
+        if (hasValidVerifyKey && activeDESKey) {
+            return decryptDES(ciphertext, activeDESKey);
+        }
+        return ciphertext;
+    };
 
     /**
      * Fetch all vehicle applications from the backend.
@@ -643,13 +652,16 @@ export default function AdminPanel() {
     const clearVerify = () => { setVerifyInput(''); setActiveVerify(''); };
 
     const handleVerifySecretKey = () => {
-        // Manual key gate for personnel users to reveal DES-decrypted values.
-        if ((verifySecretKeyInput || '').trim() === 'UA-SECRET-KEY') {
+        // Accept any non-empty key for unlock, store it for decryption
+        const key = (verifySecretKeyInput || '').trim();
+        if (key.length >= 8) { // DES keys are 8 bytes (min practical length)
             setHasValidVerifyKey(true);
+            setActiveDESKey(key);
             showInfo('Valid secret key. Decrypted verify view enabled.');
         } else {
             setHasValidVerifyKey(false);
-            showError('Invalid secret key.');
+            setActiveDESKey('');
+            showError('Invalid secret key. Key must be at least 8 characters.');
         }
     };
 
@@ -1283,13 +1295,33 @@ export default function AdminPanel() {
                         </button>
 
                         {showPersonnelNotif && (
-                            <div className="notif-dropdown" style={{ minWidth: '320px' }}>
+                            <div
+                                className="notif-dropdown"
+                                style={{
+                                    minWidth: '320px',
+                                    ...(personnelNotifItems.length >= 5
+                                        ? { maxHeight: '320px', overflowY: 'auto' }
+                                        : {})
+                                }}
+                            >
                                 <h4>Notifications</h4>
                                 {personnelNotifItems.length === 0 ? (
                                     <p className="empty-notif">No new notifications.</p>
                                 ) : (
                                     personnelNotifItems.map((notif) => (
-                                        <div key={notif.key} className="notif-item">
+                                        <div
+                                            key={notif.key}
+                                            className="notif-item"
+                                            onClick={() => {
+                                                // Mark this notification as read when clicked
+                                                if (!readPersonnelNotifKeys.includes(notif.key)) {
+                                                    const updatedRead = [...readPersonnelNotifKeys, notif.key];
+                                                    setReadPersonnelNotifKeys(updatedRead);
+                                                    localStorage.setItem(personnelNotifReadStorageKey, JSON.stringify(updatedRead));
+                                                }
+                                            }}
+                                            style={{ cursor: 'pointer' }}
+                                        >
                                             <strong>Reserved For:</strong> {notif.reservedForLabel}<br />
                                             {notif.message}
                                         </div>
@@ -1900,7 +1932,9 @@ export default function AdminPanel() {
                                         <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>Reason</th>
                                         <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>Reservation Date</th>
                                         {reservationMiniTab === 'all' && (
-                                            <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>Status</th>
+                                            <th style={{ padding: '10px', textAlign: 'left' }}>
+                                                Status
+                                            </th>
                                         )}
                                     </tr>
                                 </thead>
@@ -2450,7 +2484,6 @@ export default function AdminPanel() {
                 </>)}
 
                 {activeTab === 'logs' && isAdmin && (
-                <>
                 <div className="panel">
                     <h3>Parking Logs</h3>
                     {parkingLogs.length === 0 ? (
@@ -2507,7 +2540,7 @@ export default function AdminPanel() {
                         </div>
                     )}
                 </div>
-                </>)}
+                )}
 
                 {activeTab === 'accounts' && isRootAdmin && (
                 <div className="panel">

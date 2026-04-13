@@ -308,17 +308,21 @@ export default function AdminPanel() {
             isStickerValidForCurrentSemester(r) &&
             (r.sticker_id || '').trim().toUpperCase() === normalizedStickerId
         );
-        if (matches.length === 0) return null;
-
-        // Prefer the most recent approved record in case of historical duplicate sticker IDs.
+        if (matches.length === 0) return null;        // Prefer the most recent approved record in case of historical duplicate sticker IDs.
         const sortedMatches = matches.slice().sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
-        return decryptData(sortedMatches[0].plate_number);
-    };
-
-    // Local alias used by existing table/render code.
+        return decryptData(sortedMatches[0].plate_number, sortedMatches[0].role);
+    };    // Local alias used by existing table/render code.
     // Non-root personnel can decrypt only after valid key-unlock gate is satisfied.
-    const decryptData = (ciphertext) => {
+    // applicantRole: the role of the person who created/owns the application
+    // If applicant is rootadmin, data is plain text (no decryption needed)
+    const decryptData = (ciphertext, applicantRole) => {
+        // If the record owner is rootadmin, data is stored in plain text
+        if ((applicantRole || '').toLowerCase() === 'root_admin') {
+            return ciphertext;
+        }
+        // Current user is rootadmin, so decrypt encrypted admin/guard data
         if (isRootAdmin) return decryptDES(ciphertext);
+        // Non-admin user with valid key
         if (hasValidVerifyKey) {
             return decryptDES(ciphertext, (verifySecretKeyInput || '').trim());
         }
@@ -1232,20 +1236,17 @@ export default function AdminPanel() {
 
     const APPLICATIONS_PAGE_SIZE = 20;
     const RESERVATIONS_PAGE_SIZE = 20;
-    const LOGS_PAGE_SIZE = 20;
-
-    // Root admin can always view plaintext; other personnel require secret-key unlock.
+    const LOGS_PAGE_SIZE = 20;    // Root admin can always view plaintext; other personnel require secret-key unlock.
     const canViewVerifyDecrypted = isRootAdmin || hasValidVerifyKey;
-    const getSensitiveText = (cipherText) => {
+    const getSensitiveText = (cipherText, applicantRole) => {
         const normalizedValue = cipherText == null ? '' : String(cipherText);
         if (!normalizedValue) return '---';
-        return canViewVerifyDecrypted ? decryptData(normalizedValue) : normalizedValue;
+        return canViewVerifyDecrypted ? decryptData(normalizedValue, applicantRole) : normalizedValue;
     };
 
     const filteredApplicationRows = records
-        .filter((record) => {
-            if (activeVerify) return record.sticker_id === activeVerify;
-            const plateMatch = getSensitiveText(record.plate_number).toLowerCase().includes(search);
+        .filter((record) => {        if (activeVerify) return record.sticker_id === activeVerify;
+            const plateMatch = getSensitiveText(record.plate_number, record.role).toLowerCase().includes(search);
             const normalizedRole = (record.role || '').toLowerCase();
             const isNonStudent = normalizedRole === 'guest' || normalizedRole === 'non-student';
             const roleValue = isNonStudent ? 'non-student' : 'student';
@@ -1662,9 +1663,8 @@ export default function AdminPanel() {
                                     </thead>
                                     <tbody>
                                         {paginatedApplicationRows.map((v) => {
-                                            return (
-                                            <tr key={v.id}>
-                                                <td style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={getSensitiveText(v.owner_name)}>{getSensitiveText(v.owner_name)}</td>
+                                            return (                                            <tr key={v.id}>
+                                                <td style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={getSensitiveText(v.owner_name, v.role)}>{getSensitiveText(v.owner_name, v.role)}</td>
                                         
                                         {/* ROLE INFO COLUMN */}
                                         <td style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={v.identifier || 'N/A'}>
@@ -1690,7 +1690,7 @@ export default function AdminPanel() {
                                             </div>
                                         </td>
 
-                                        <td className="bold-plate" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={getSensitiveText(v.plate_number)}>{getSensitiveText(v.plate_number)}</td>
+                                        <td className="bold-plate" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={getSensitiveText(v.plate_number, v.role)}>{getSensitiveText(v.plate_number, v.role)}</td>
                                         <td className="sticker-id-text" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={v.sticker_id || '---'}>{v.sticker_id || '---'}</td>
                                         <td style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={v.vehicle_type}>{v.vehicle_type}</td>
                                         <td style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={`₱${getFee(v.vehicle_type).toLocaleString()} | ${v.payment_method || '---'} | ${v.payment_reference || '---'}`}>
@@ -1809,10 +1809,9 @@ export default function AdminPanel() {
                                     ✕
                                 </button>
                                 <h3 style={{ margin: '0 0 16px', color: '#0f172a', textAlign: 'center' }}>Application Notes</h3>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
-                                    <div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>                                    <div>
                                         <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>Owner Name</label>
-                                        <input type="text" value={getSensitiveText(applicationModalRecord.owner_name)} disabled style={{ background: '#f8fafc', color: '#334155' }} />
+                                        <input type="text" value={getSensitiveText(applicationModalRecord.owner_name, applicationModalRecord.role)} disabled style={{ background: '#f8fafc', color: '#334155' }} />
                                     </div>
                                     <div>
                                         <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>Status</label>
@@ -1874,10 +1873,9 @@ export default function AdminPanel() {
                                     );
                                 })()}
 
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
-                                    <div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>                                    <div>
                                         <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>Plate Number</label>
-                                        <input type="text" value={getSensitiveText(applicationModalRecord.plate_number)} disabled style={{ background: '#f8fafc', color: '#334155' }} />
+                                        <input type="text" value={getSensitiveText(applicationModalRecord.plate_number, applicationModalRecord.role)} disabled style={{ background: '#f8fafc', color: '#334155' }} />
                                     </div>
                                     <div>
                                         <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>Sticker ID</label>
@@ -1998,15 +1996,14 @@ export default function AdminPanel() {
                                 const record = records.find(r => (r.sticker_id || '').toUpperCase() === activeVerify);
                                 if (!record) {
                                     return <p style={{ color: '#b91c1c', fontWeight: 700 }}>No record found for {activeVerify}.</p>;
-                                }
-                                const validSemester = isStickerValidForCurrentSemester(record);
+                                }                                const validSemester = isStickerValidForCurrentSemester(record);
                                 const validityPeriodLabel = getSemesterLabelFromDate(record.expiration_date ? `${record.expiration_date}T00:00:00` : null);
                                 const isCurrentSemesterBucketMatch = getSemesterBucket(record.expiration_date ? `${record.expiration_date}T00:00:00` : null) === getSemesterBucket(new Date());
                                 const verificationStatusLabel = record.status === 'Pending'
                                     ? 'Pending ⏳'
                                     : (record.status === 'Approved' && (validSemester || isCurrentSemesterBucketMatch) ? 'Active ✅' : 'Expired ❌');
-                                const resolvedPlate = decryptData(record.plate_number);
-                                const resolvedOwner = decryptData(record.owner_name);
+                                const resolvedPlate = decryptData(record.plate_number, record.role);
+                                const resolvedOwner = decryptData(record.owner_name, record.role);
                                 return (
                                     <div style={{ border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px', background: '#f8fafc' }}>
                                         <div><strong>Sticker:</strong> {record.sticker_id}</div>

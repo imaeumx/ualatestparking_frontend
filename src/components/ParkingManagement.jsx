@@ -607,16 +607,15 @@ export default function ParkingManagement({
         const normalizedSpots = selectedSpotsForReservation.size > 0
             ? Array.from(selectedSpotsForReservation)
             : fallbackSingleSpot;
-        const validUserStickers = getValidUserStickers();
-
-        // Validate spot selection
+        const validUserStickers = getValidUserStickers();        // Validate spot selection
         if (normalizedSpots.length === 0) {
             showError('Please select at least one parking spot to reserve.');
             return;
         }
 
-        if (normalizedSpots.length === 1 && validUserStickers.length === 0) {
-            showError("You can't reserve without any valid parking stickers.");
+        // CRITICAL: User MUST have approved sticker to reserve - applies to BOTH single and multi-spot
+        if (validUserStickers.length === 0) {
+            showError("You can't reserve without any valid parking stickers. Please apply for a sticker first.");
             return;
         }
 
@@ -704,8 +703,13 @@ export default function ParkingManagement({
                 setReservationModalError('Please provide a reason for the reservation.');
                 return;
             }
-            finalReason = reservationReasonText.trim();
-        } else {
+            finalReason = reservationReasonText.trim();        } else {
+            // Multi-spot reservations ALSO require a valid user sticker - cannot reserve without approved sticker
+            if (validUserStickers.length === 0) {
+                setReservationModalError("You can't reserve without any valid parking stickers. Please apply for a sticker first.");
+                return;
+            }
+
             // Multi-spot reservations are treated as organizational/guest-style requests.
             reservationCategoryPayload = reservationReasonCategory;
             const plateNumber = (reservePlateInput || '').trim().toUpperCase();

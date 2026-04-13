@@ -100,8 +100,7 @@ export default function StickerManagement({
      * 3) POST encrypted payload + unencrypted metadata (vehicle type, payment method) to API
      * 4) On success: reset form, close modal, refresh table to show new application
      * 5) On error: show error message (backend returned failure or network error)
-     */
-    const submitApp = async () => {
+     */    const submitApp = async () => {
         // ============ VALIDATION PHASE ============
         // Check all required fields before attempting encryption/network call
         // Early return pattern: fail fast with user feedback, avoiding wasted computation
@@ -113,10 +112,14 @@ export default function StickerManagement({
         if (!paymentReference.trim()) return showError("Please enter payment reference number.");
 
         // ============ ENCRYPTION PHASE ============
-        // Encrypt sensitive data using DES algorithm (from desCrypto.js utility)
-        // encryptDES uses a hardcoded key shared between frontend and backend
-        const encPlate = encryptDES(normalizedPlate); // Example: "ABC1234" → "$sDf#1@8"
-        const encOwner = encryptDES(displayFullName); // Example: \"John Doe\" → \"kX9$mL2#\"
+        // Check user role: rootadmin uses plain text, admin/guard use encryption
+        const userRole = (user?.role || '').toLowerCase();
+        const isRootAdmin = userRole === 'root_admin';
+        
+        // For rootadmin: store plain text. For admin/guard: encrypt using DES
+        // This ensures consistency with backend user profile encryption strategy
+        const encPlate = isRootAdmin ? normalizedPlate : encryptDES(normalizedPlate); // Example: "ABC1234" → "$sDf#1@8"
+        const encOwner = isRootAdmin ? displayFullName : encryptDES(displayFullName); // Example: \"John Doe\" → \"kX9$mL2#\"
         
         try {
             // ============ SUBMISSION PHASE ============
@@ -228,11 +231,10 @@ export default function StickerManagement({
                             {records.length === 0 ? (
                                 <tr><td colSpan="7" className="empty-table">No records found.</td></tr>
                             ) : (
-                                paginatedUserApplicationRecords.map((v, i) => (
-                                    <tr key={i}>
+                                paginatedUserApplicationRecords.map((v, i) => (                                    <tr key={i}>
                                         {/* The plate is stored encrypted in the backend,
                                             so we decrypt it here to show a readable value to the user. */}
-                                        <td className="bold-plate">{decryptData(v.plate_number)}</td>
+                                        <td className="bold-plate">{decryptData(v.plate_number, v.role)}</td>
                                         <td>{v.vehicle_type}</td>
                                         <td>{v.payment_method || '---'}</td>
                                         <td style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{v.payment_reference || '---'}</td>

@@ -329,40 +329,6 @@ export default function AdminPanel() {
         return ciphertext;
     };
 
-    const canDecryptAnyRecordWithKey = (candidateKey) => {
-        const normalizedKey = (candidateKey || '').trim();
-        if (!normalizedKey) return false;
-
-        const encryptedCandidates = records.flatMap((record) => [record?.plate_number, record?.owner_name])
-            .map((value) => (value == null ? '' : String(value).trim()))
-            .filter((value) => value.length > 0);
-
-        return encryptedCandidates.some((cipherValue) => {
-            const decryptedValue = decryptDES(cipherValue, normalizedKey);
-            return !!decryptedValue && decryptedValue !== cipherValue;
-        });
-    };
-
-    const canDecryptRecordWithKey = (record, candidateKey) => {
-        const normalizedKey = (candidateKey || '').trim();
-        if (!record || !normalizedKey) return false;
-
-        const encryptedCandidates = [record?.plate_number, record?.owner_name]
-            .map((value) => (value == null ? '' : String(value).trim()))
-            .filter((value) => value.length > 0);
-
-        return encryptedCandidates.some((cipherValue) => {
-            const decryptedValue = decryptDES(cipherValue, normalizedKey);
-            return !!decryptedValue && decryptedValue !== cipherValue;
-        });
-    };
-
-    const getVerifyRecordBySticker = (stickerId) => {
-        const normalizedStickerId = (stickerId || '').trim().toUpperCase();
-        if (!normalizedStickerId) return null;
-        return records.find((record) => (record.sticker_id || '').toUpperCase() === normalizedStickerId) || null;
-    };
-
     /**
      * Fetch all vehicle applications from the backend.
      * Updates local state and localStorage with valid stickers.
@@ -753,7 +719,7 @@ export default function AdminPanel() {
             }
         }
 
-        // If key matches configured system key, unlock immediately.
+        // Only accept the configured system key; no fallback decryption attempts.
         if (matchesSystemKey) {
             setHasValidVerifyKey(true);
             setShowVerifySecretKeyModal(false);
@@ -761,23 +727,8 @@ export default function AdminPanel() {
             return;
         }
 
-        const activeRecord = getVerifyRecordBySticker(activeVerify);
-        if (activeRecord && !canDecryptRecordWithKey(activeRecord, key)) {
-            setHasValidVerifyKey(false);
-            showError('Secret key does not match this sticker record.');
-            return;
-        }
-
-        const canDecryptRecords = canDecryptAnyRecordWithKey(key);
-        if (!canDecryptRecords) {
-            setHasValidVerifyKey(false);
-            showError('Invalid secret key.');
-            return;
-        }
-
-        setHasValidVerifyKey(true);
-        setShowVerifySecretKeyModal(false);
-        showInfo('Valid secret key. Decrypted verify view enabled.');
+        setHasValidVerifyKey(false);
+        showError('Invalid secret key.');
     };
 
     // Enter key handler for sticker verify field.
